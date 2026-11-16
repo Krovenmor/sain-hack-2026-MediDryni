@@ -1,0 +1,3 @@
+# Документация остаётся в Git, но не попадает в архив деплоя.
+/docs export-ignore
+*.md export-ignore
