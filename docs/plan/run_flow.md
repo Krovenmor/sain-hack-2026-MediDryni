@@ -1,12 +1,4 @@
-# Архитектура и порядок выполнения `/run`
-
-C2 показывает только компоненты и зависимости, а не хронологию вызовов.
-
-![C2 — компоненты MediDryni backend](c2-component.svg)
-
-Исходник диаграммы: [c2-component.puml](c2-component.puml).
-
-## Поток online/final-проверки
+# Поток online/final-проверки
 
 1. **Получить вход.** `HTTP transport` проверяет `case == 2` и Bearer token. `RunCase` вызывает `GET /case/2/getData?dataset_code=...` с тем же token. До получения dataset никакие room-сессии не создаются: для них нужны `record_id`.
 
