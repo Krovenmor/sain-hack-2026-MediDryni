@@ -32,31 +32,39 @@ services/
     di/container.py          # конфигурация и ручная сборка зависимостей
     transport/http/          # /run, /health, demo API, Pydantic-схемы
     domain/                  # Stay, Request, DeviceState, Intent, Scenario, ошибки
-    service/                 # RunCase, SleepPlanner, RequestHandler, DemoService
+    ports/ai.py              # AIAgent + DTO входа/выхода порта
+    service/
+      run_case.py
+      sleep_planner.py
+      request_handler.py
+      demo.py
     infra/                   # HackAPI, RoomAPI, in-memory store
   ai_service/
-    contract.py              # публичные DTO + Protocol AIAgent
-    domain/                  # Intent, PreferenceHint, Interpretation
-    service/                 # batching, контекст диалога, post-validation
+    domain/                  # внутренние модели AI
+    service/
+      agent.py               # реализация AIAgent из concierge_service
+      ...                    # batching, контекст диалога, post-validation
     infra/llm_client.py      # LLM proxy, JSON-ответы, timeout/retry
 tests/                         # unit, integration, contract
 requirements.txt             # единственный набор зависимостей deployable app
 start.sh                     # запуск concierge_service.cmd.api.main:app
 ```
 
-`transport -> application service -> domain`; `infra` реализует порты домена; только `di/cmd` собирают конкретные реализации. Бизнес-код `concierge_service` импортирует исключительно `ai_service.contract`; composition root может импортировать реализацию для сборки, обратный импорт из AI запрещён. У внутреннего `ai_service` нет `cmd/api` и `transport`: они имитировали бы отдельный сервис без практической пользы.
+`transport -> application service -> domain`; `infra` и `ai_service` реализуют порты application layer; только `di/cmd` собирают конкретные реализации. **`concierge_service` не импортирует `ai_service` вообще.** Зависимость направлена внутрь: `ai_service -> порт concierge_service`. Composition root — единственное место, которое импортирует оба модуля и внедряет реализацию в `RunCase` и `RequestHandler`. У внутреннего `ai_service` нет `cmd/api` и `transport`: они имитировали бы отдельный сервис без практической пользы.
 
-Контракт фиксируется **в коде**, а не только в Markdown:
+Отдельный `contracts/` не требуется: это не общий контракт равноправных сервисов, а порт, определяемый потребителем. Он фиксируется **в коде**, вместе с DTO, чтобы `concierge_service` не зависел от моделей AI:
 
 ```python
+# concierge_service/ports/ai.py
+
 class AIAgent(Protocol):
     async def resolve_preferences(
         self, items: Sequence[ProfileContext]
     ) -> Sequence[PreferenceHints]: ...
 
-    async def interpret_requests(
-        self, items: Sequence[RequestContext]
-    ) -> Sequence[RequestInterpretation]: ...
+    async def interpret_request(
+        self, item: RequestContext
+    ) -> RequestInterpretation: ...
 ```
 
 `RequestInterpretation` содержит `record_id`, для каждой реплики один из 19 intent и типизированные slots. Он не содержит финальный `response_class`: его определяет `RequestHandler` после проверки и вызова симулятора. Входные элементы и результаты связываются по ID, неизвестные ID/intent/поля отклоняются. Внешний источник истины — `docs/contracts/openapi.json`; FastAPI публикует OpenAPI для собственного demo API.

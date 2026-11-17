@@ -30,11 +30,11 @@ rectangle "MediDryni backend\nPython 3.11 · один процесс · без �
   rectangle "HTTP API\n/run · /health · /api/*" as http #E0F2FE
 
   rectangle "concierge_service" #EFF6FF {
-    rectangle "Application core\nRunCase · SleepPlanner · RequestHandler\nЗаезды · просьбы · сценарии R1–R8" as core #DBEAFE
+    rectangle "Application core + ports\nRunCase · SleepPlanner · RequestHandler\nЗаезды · просьбы · сценарии R1–R8" as core #DBEAFE
   }
 
   rectangle "ai_service" #F5F3FF {
-    rectangle "AIAgent + LLM adapter\nПредпочтения · Intent + slots\nВалидация · retry · rate limit" as ai #EDE9FE
+    rectangle "AIAgent implementation\nLLM adapter · Предпочтения · Intent + slots\nВалидация · retry · rate limit" as ai #EDE9FE
   }
 
   rectangle "Integration adapters\nHackApiAdapter · RoomApiAdapter" as adapters #ECFEFF
@@ -49,7 +49,7 @@ rectangle "Внешние системы" #F8FAFC {
 
 caller --> http : HTTPS
 http --> core : запрос
-core --> ai : in-process
+core --> ai : через порт core
 core --> store : контекст
 core --> adapters : вызовы API
 ai --> llm : HTTPS
