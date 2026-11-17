@@ -43,7 +43,7 @@ services/
     transport/http/          # online: /run, /health; позже: demo API
     domain/                  # модели, R1–R8, SleepPlanner, ActionPlanner
     ports/
-      ai.py                  # AIAgent + DTO входа/выхода порта
+      ai.py                  # AiAgent + DTO входа/выхода порта
       hack_api.py
       room.py
       store.py
@@ -57,7 +57,7 @@ services/
   ai_service/
     domain/                  # внутренние модели AI
     service/
-      agent.py               # реализация AIAgent из concierge_service
+      agent.py               # реализация AiAgent из concierge_service
       ...                    # prompt builder, batching, post-validation
     infra/llm_client.py      # LLM proxy, JSON-ответы, timeout/retry
 tests/                         # unit, integration, contract
@@ -67,22 +67,22 @@ start.sh                     # запуск concierge_service.cmd.api.main:app
 
 `transport -> application service -> domain`; `infra` и `ai_service` реализуют порты application layer. **Домен, прикладные сервисы и порты `concierge_service` не импортируют `ai_service`.** Зависимость направлена внутрь: `ai_service -> порт concierge_service`. Composition root остаётся в `concierge_service/di/container.py`: он импортирует конкретные реализации обоих модулей и внедряет зависимости в `RunCase` и `RequestHandler`; `cmd` запускает приложение через эту сборку. У внутреннего `ai_service` нет `cmd/api` и `transport`: они имитировали бы отдельный сервис без практической пользы.
 
-Отдельный `contracts/` не требуется: это не общий контракт равноправных сервисов, а порт, определяемый потребителем. Он фиксируется **в коде**, вместе с DTO, чтобы `concierge_service` не зависел от моделей AI:
+Отдельный Python-пакет `contracts/` не требуется: порт определяется потребителем и фиксируется **в коде** вместе с DTO, чтобы `concierge_service` не зависел от моделей AI. Порт уже объявлен в [`services/concierge_service/ports/ai.py`](../../services/concierge_service/ports/ai.py); входные данные, slots, источники hints, ошибки и обязанности разработчика AI описаны в [контракте AiAgent v1](../contracts/ai_agent.md).
 
 ```python
 # concierge_service/ports/ai.py
 
-class AIAgent(Protocol):
+class AiAgent(Protocol):
     async def extract_preference_hints(
-        self, items: Sequence[ProfileContext]
-    ) -> Sequence[PreferenceHints]: ...
+        self, items: Sequence[ProfileContext], *, timeout_s: float
+    ) -> Sequence[PreferenceResult]: ...
 
     async def interpret_request(
-        self, item: RequestContext
+        self, item: RequestContext, *, timeout_s: float
     ) -> RequestInterpretation: ...
 ```
 
-`RequestInterpretation` содержит `record_id`, **один** из 19 intent и типизированные slots для всей записи: по кейсу даже две реплики вместе выражают одно намерение. Он не содержит готовые `/action` и финальные `response_class`. `ActionPlanner` превращает интерпретацию в ноль или несколько `PlannedAction {device_id, values}`, а `RequestHandler` валидирует весь план, выполняет его в фиксированное время просьбы и возвращает 1–2 replies в порядке входных реплик. Неизвестные ID/intent/поля отклоняются. Внешний источник истины — `docs/contracts/openapi.json`; FastAPI публикует OpenAPI для собственного demo API.
+`PreferenceResult` — успешные `PreferenceHints` или `PreferenceFailure` для конкретного пользователя; пустые hints считаются успехом. `RequestInterpretation` содержит `record_id`, **один** из 19 intent и типизированные slots для всей записи: по кейсу даже две реплики вместе выражают одно намерение. Он не содержит готовые `/action` и финальные `response_class`. `ActionPlanner` превращает интерпретацию в ноль или несколько `PlannedAction {device_id, values}`, а `RequestHandler` валидирует весь план, выполняет его в фиксированное время просьбы и возвращает 1–2 replies в порядке входных реплик. Неизвестные ID/intent/поля отклоняются. Внешний источник истины — `docs/contracts/openapi.json`; внутренний AI-контракт дополняет его. FastAPI публикует OpenAPI для собственного demo API.
 
 Начальные гипотезы resolver'ов для особых intent (это наши решения, а не дословные правила кейса):
 - `like_home` — устойчивые домашние предпочтения: структурированный профиль приоритетнее противоречащей ленты;
@@ -101,7 +101,7 @@ class AIAgent(Protocol):
 2. Построить индексы пользователей, ленты и устройств; нормализовать timezone-aware даты. Обработка просьб одного пользователя — последовательно, разных пользователей — с ограниченным параллелизмом.
 3. Для каждого пользователя один раз вызвать AI для извлечения предпочтений из ленты и истории диалога, независимо от заполненности профиля. Дождаться результата в рамках обычного timeout, объединить параметры по приоритету «профиль → hints → дефолты» и рассчитать отбой с учётом R8. При ошибке/timeout AI использовать профиль и дефолты; успешный ответ без нужных сведений также дополняется дефолтами.
 4. `SleepPlanner` построить шаги R1–R8 только из каталога устройств; проверить интервал `[check_in_at, target_wake_at]`, значения и поля. Для R1 при заселении до отбоя вечерний свет действует с `max(check_in_at, bedtime − 60 минут)` до отбоя: при позднем check-in допустимо меньше 60 минут, отбой ради полного часа не переносится. При заселении в момент отбоя или позже интервал R1 не создаётся, применяются настройки текущей фазы сценария. Все даты сериализовать в ISO 8601 с явным offset, не `Z`; учесть R6 и то, что таймер звука не выключает его автоматически. Создать stay session и загрузить scenario.
-5. Для каждой просьбы создать request session и вызвать AI с текущими 1–2 репликами и историей только её пользователя. AI возвращает один intent для всей записи. `ActionPlanner` по интерпретации, `initial_state`, профилю и ленте строит список действий; после проверки `RequestHandler` выполняет его в фиксированное время просьбы, сохраняет незатронутые поля и после ответа пополняет контекст пользователя. При невалидном AI-ответе — один retry, затем deterministic fallback или безопасный `refused`, но не пропуск всей записи без анализа.
+5. Для каждой просьбы создать request session и вызвать AI с текущими 1–2 репликами и историей только её пользователя. AI возвращает один intent для всей записи. `ActionPlanner` по интерпретации, `initial_state`, профилю и ленте строит список действий; после проверки `RequestHandler` выполняет его в фиксированное время просьбы, сохраняет незатронутые поля и после ответа пополняет контекст пользователя. При невалидном ответе модели AI-адаптер выполняет один retry; при итоговом `AiAgentError` core использует deterministic fallback или безопасный `refused`, не повторяя AI-вызов и не пропуская всю запись без анализа.
 6. Для `out_of_scope`, `medical`, недопустимых значений и ошибок действия — `refused` с причиной; `done` — после успешного действия либо если требуемое состояние уже достигнуто. Тексты формировать шаблонами без диагнозов, лекарств, медицинских обещаний и советов вне правил сна; отель при упоминании называть только «партнёрский отель сна».
 7. Проверить итог локальной схемой `Case2Answers`, вернуть HTTP 200. Ошибку одной записи изолировать, чтобы не потерять весь набор; `/case/2/validate` в online/final не вызывать.
 
