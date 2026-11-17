@@ -1,20 +1,48 @@
-```mermaid
-graph TD
-    A["/run"] --> |'приходит запрос'| CORE_SERVICE
-    CORE_SERVICE --> |'Этап 1 регает сессию - делает POST на room_session'| HACK_API
-    CORE_SERVICE --> |"1.1 GET /case/2/getData просит данные"| HACK_API
-    HACK_API --> |'возращает данные'| CORE_SERVICE
+# Архитектура и порядок выполнения `/run`
 
-    AI_SERVICE --> |'отсылает все ллм, впервые или по новой, если json кринж'| LLM
-    LLM --> |'отдает структурированный json'| AI_SERVICE
+C2 показывает только компоненты и зависимости, а не хронологию вызовов.
 
-    AI_SERVICE --> |'возращает ответ core_service'| CORE_SERVICE
+![C2 — компоненты MediDryni backend](c2-component.svg)
 
-    CORE_SERVICE --> |'Этап 1.2 завершени: планирует расписание и делает POST на room_session_scenario'| HACK_API
+Исходник диаграммы: [c2-component.puml](c2-component.puml).
 
-    CORE_SERVICE --> |'Этап 2 выполнение просьб'| AI_SERVICE
-    AI_SERVICE --> |'2.1 Ответы на просьбы, CORE_SERVICE дополняет текущюю историю'| CORE_SERVICE
-    CORE_SERVICE --> |'2.2 дополняет текущюю историю чата и вызывает POST на room_session_action если true'| HACK_API
-    
-    CORE_SERVICE --> |'Этап 4, после выполнения всех просьб возврат json с 'record_id', 'session_id', 'replies''| A
+## Поток online/final-проверки
+
+1. **Получить вход.** `HTTP transport` проверяет `case == 2` и Bearer token. `RunCase` вызывает `GET /case/2/getData?dataset_code=...` с тем же token. До получения dataset никакие room-сессии не создаются: для них нужны `record_id`.
+
+2. **Подготовить контекст.** Данные индексируются по `user_id` и `record_id`. `ai_service` извлекает preference hints из `events` и `chat_history`; `concierge_service` объединяет их с профилем. Структурированный профиль имеет приоритет над текстом ленты.
+
+3. **Обработать каждый заезд.** `SleepPlanner` детерминированно строит сценарий R1–R8 и проверяет время, устройства и диапазоны. Для **каждого** `stays[].record_id` отдельно:
+   - `POST /room/session` с `kind=stay`;
+   - `POST /room/{session_id}/scenario` с полным сценарием;
+   - сохранить пару `{record_id, session_id}` для ответа.
+
+4. **Обработать просьбы в порядке диалога.** Просьбы каждого пользователя выполняются последовательно в исходном хронологическом порядке набора; разные пользователи могут выполняться параллельно в пределах rate limit. Для **каждого** `requests[].record_id`:
+   - создать отдельный сеанс `POST /room/session` с `kind=request` даже для будущего отказа;
+   - передать в AI текущие 1–2 `utterances` одним вызовом вместе с предыдущей историей только этого пользователя;
+   - проверить возвращённый `record_id`, intent и slots; при невалидном JSON — один retry, затем безопасный fallback;
+   - вычислить device patch от `initial_state` текущей записи и проверить его по `devices`;
+   - для допустимых действий вызвать `POST /room/{session_id}/action` для каждого изменяемого устройства; для `medical`, `out_of_scope`, `invalid_value` действия не выполнять;
+   - сформировать 1–2 безопасные replies в порядке входных реплик. `done` ставится после успешного действия либо если требуемое состояние уже достигнуто, иначе — `refused`.
+
+5. **Обновить контекст.** Только после обработки текущей записи добавить её utterances и готовые replies в conversation context этого пользователя. Переносится **диалог**, а не состояние устройств: каждая следующая запись использует собственный `initial_state` и новый session.
+
+6. **Вернуть полный ответ.** Локально проверить `Case2Answers` и вернуть HTTP 200:
+
+```json
+{
+  "stays": [{"record_id": "stay_1", "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}],
+  "requests": [{
+    "record_id": "request_1",
+    "session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "replies": [{
+      "role": "agent",
+      "at": "2026-11-20T22:00:00+03:00",
+      "text": "Уменьшил яркость света.",
+      "response_class": "done"
+    }]
+  }]
+}
 ```
+
+`/case/2/validate` используется только при dev-проверке, из online/final `/run` не вызывается. Ошибка одной записи не должна отменять обработку остальных; при этом отсутствующая или невалидная запись будет оценена как неверная.

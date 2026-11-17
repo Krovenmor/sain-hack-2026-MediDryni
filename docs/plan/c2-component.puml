@@ -1,0 +1,48 @@
+@startuml
+title C2 — MediDryni backend (модульный монолит)
+left to right direction
+skinparam componentStyle rectangle
+skinparam linetype ortho
+skinparam shadowing false
+
+actor "Стенд / клиент" as caller
+
+rectangle "MediDryni backend\nPython 3.11, один процесс" {
+  [HTTP transport\n/run, /health, /api/*] as http
+
+  package "concierge_service" {
+    [RunCase\nоркестрация набора] as run
+    [SleepPlanner\nR1–R8] as planner
+    [RequestHandler\nintent → actions → replies] as handler
+    [HackApiAdapter] as hackAdapter
+    [RoomApiAdapter] as roomAdapter
+    database "In-memory store\ndialog + demo state" as store
+  }
+
+  package "ai_service" {
+    [AIAgent contract\npreferences + interpretation] as agent
+    [LLM adapter\nvalidation, retry, rate limit] as llmAdapter
+  }
+}
+
+[Hack Dataset API\n/case/2/getData] as dataset
+[Room Simulator\n/session /scenario /action] as room
+[LLM Proxy\nOpenAI-compatible] as llm
+
+caller --> http : HTTPS
+http --> run : /run
+http --> handler : demo message
+run --> planner : stays
+run --> handler : ordered requests
+run --> agent : ProfileContext\n(in-process)
+handler --> agent : RequestContext\n(in-process)
+agent --> llmAdapter
+llmAdapter --> llm : /chat/completions
+run --> hackAdapter : dataset_code + token
+hackAdapter --> dataset : GET
+run --> roomAdapter : stay session + scenario
+handler --> roomAdapter : request session + actions
+roomAdapter --> room : HTTPS
+handler --> store : dialogue context
+run --> store : final stay / demo state
+@enduml
