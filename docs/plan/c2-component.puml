@@ -1,0 +1,58 @@
+@startuml
+title C2 — архитектура MediDryni
+
+skinparam backgroundColor #F8FAFC
+skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontSize 14
+skinparam defaultFontColor #0F172A
+skinparam titleFontSize 20
+skinparam titleFontColor #0F172A
+skinparam shadowing false
+skinparam linetype ortho
+skinparam nodesep 45
+skinparam ranksep 50
+skinparam roundCorner 12
+skinparam ArrowColor #64748B
+skinparam ArrowFontColor #475569
+skinparam ArrowFontSize 12
+skinparam rectangle {
+  BorderColor #64748B
+  FontColor #0F172A
+}
+skinparam database {
+  BorderColor #D97706
+  FontColor #0F172A
+}
+
+rectangle "Стенд хакатона / клиент\n/run · demo API" as caller #E2E8F0
+
+rectangle "MediDryni backend\nPython 3.11 · один процесс · без внутреннего HTTP" #FFFFFF {
+  rectangle "HTTP API\n/run · /health · /api/*" as http #E0F2FE
+
+  rectangle "concierge_service" #EFF6FF {
+    rectangle "Application core + ports\nRunCase · SleepPlanner · RequestHandler\nЗаезды · просьбы · сценарии R1–R8" as core #DBEAFE
+  }
+
+  rectangle "ai_service" #F5F3FF {
+    rectangle "AIAgent implementation\nLLM adapter · Предпочтения · Intent + slots\nВалидация · retry · rate limit" as ai #EDE9FE
+  }
+
+  rectangle "Integration adapters\nHackApiAdapter · RoomApiAdapter" as adapters #ECFEFF
+  database "In-memory\nДиалог и demo-состояние" as store #FFF7ED
+}
+
+rectangle "Внешние системы" #F8FAFC {
+  rectangle "Hack Dataset API\nGET /case/2/getData" as dataset #FFFFFF
+  rectangle "Room Simulator\n/session · /scenario · /action" as room #FFFFFF
+  rectangle "LLM Proxy\n/chat/completions" as llm #FFFFFF
+}
+
+caller --> http : HTTPS
+http --> core : запрос
+core --> ai : через порт core
+core --> store : контекст
+core --> adapters : вызовы API
+ai --> llm : HTTPS
+adapters --> dataset : данные
+adapters --> room : сессии и действия
+@enduml
