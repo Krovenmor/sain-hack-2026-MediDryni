@@ -8,6 +8,7 @@ from uuid import UUID
 import httpx
 from pydantic import Field, ValidationError
 
+from concierge_service.domain.action_planner import DevicePatch
 from concierge_service.domain.scenario import ScenarioStep
 from concierge_service.infra.wire import DeviceState, Identifier, RoomState, Timestamp, WireModel
 from concierge_service.ports.room import (
@@ -110,6 +111,18 @@ class RoomApiAdapter:
                     for step in steps
                 ]
             },
+        )
+        return _snapshot(payload, session_id)
+
+    async def apply_action(
+        self, *, session_id: UUID, patch: DevicePatch, at: datetime, token: str
+    ) -> RoomSnapshot:
+        payload = await self._request(
+            "POST",
+            f"/room/{session_id}/action",
+            _SnapshotPayload,
+            token=token,
+            json={"at": at.isoformat(), "device_id": patch.device_id, "values": dict(patch.values)},
         )
         return _snapshot(payload, session_id)
 

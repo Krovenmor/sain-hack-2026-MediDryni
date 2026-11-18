@@ -1,16 +1,11 @@
 """Deterministic room scenarios for sleep rules R1–R8."""
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from jsonschema import Draft202012Validator, FormatChecker
-from jsonschema.exceptions import SchemaError
-from referencing import Registry
-from referencing.exceptions import Unresolvable
-
-from concierge_service.domain.dataset import DeviceField, JSONScalar, Stay
+from concierge_service.domain.dataset import JSONScalar, Stay
+from concierge_service.domain.device_catalog import DeviceCatalog, DeviceFields, DeviceValueError
 from concierge_service.domain.scenario import ScenarioStep
 
 
@@ -33,7 +28,7 @@ class SleepPlanner:
         self,
         stay: Stay,
         preferences: ResolvedPreferences,
-        catalog: Mapping[str, Mapping[str, DeviceField]],
+        catalog: DeviceFields,
     ) -> tuple[ScenarioStep, ...]:
         check_in = stay.check_in_at.astimezone(UTC)
         wake = stay.target_wake_at.astimezone(UTC)
@@ -115,34 +110,14 @@ def _adjust_bedtime(home_bedtime: datetime, hotel_zone: ZoneInfo) -> datetime:
     return instant
 
 
-_format_checker = FormatChecker()
-_local_schema_registry = Registry()
-
-
 def _validate_steps(
-    steps: tuple[ScenarioStep, ...],
-    start: datetime,
-    end: datetime,
-    catalog: Mapping[str, Mapping[str, DeviceField]],
+    steps: tuple[ScenarioStep, ...], start: datetime, end: datetime, catalog: DeviceFields
 ) -> None:
-    validators: dict[tuple[str, str], Draft202012Validator] = {}
+    devices = DeviceCatalog(catalog)
     for step in steps:
         if not start <= step.at.astimezone(UTC) <= end:
             raise SleepPlanError("scenario step outside stay interval")
-        for field_id, value in step.values.items():
-            key = step.device_id, field_id
-            field = catalog.get(step.device_id, {}).get(field_id)
-            if field is None:
-                raise SleepPlanError("scenario uses an unknown device or field")
-            try:
-                if key not in validators:
-                    schema = dict(field.value_schema)
-                    Draft202012Validator.check_schema(schema)
-                    validators[key] = Draft202012Validator(
-                        schema, format_checker=_format_checker, registry=_local_schema_registry
-                    )
-                valid = validators[key].is_valid(value)
-            except (SchemaError, Unresolvable):
-                raise SleepPlanError("invalid device field schema") from None
-            if not valid:
-                raise SleepPlanError("scenario value outside device field schema")
+        try:
+            devices.validate(step.device_id, step.values)
+        except DeviceValueError as exc:
+            raise SleepPlanError(f"scenario {exc}") from None

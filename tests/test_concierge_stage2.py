@@ -17,6 +17,7 @@ from concierge_service.domain.sleep import (
     resolve_bedtime,
 )
 from concierge_service.infra.hack_api import HackApiAdapter
+from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.ports.room import RoomApiError
@@ -227,6 +228,7 @@ class RoomApiTests(unittest.IsolatedAsyncioTestCase):
 class ScenarioRunTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_loads_each_stay_and_reports_only_successful_scenarios(self) -> None:
         payload = dataset_payload()
+        payload["requests"] = []
         payload["stays"].append(dict(payload["stays"][0], record_id="stay_2"))
         failed_session = UUID("44444444-4444-4444-4444-444444444444")
         requests: list[httpx.Request] = []
@@ -255,6 +257,7 @@ class ScenarioRunTests(unittest.IsolatedAsyncioTestCase):
                 room_api=RoomApiAdapter(base_url="https://hack.test", client=upstream),
                 sleep_planner=SleepPlanner(),
                 ai_agent=MockAiAgent(),
+                conversation_store_factory=InMemoryConversationStore,
             ))
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"

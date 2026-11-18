@@ -8,6 +8,7 @@ import httpx
 
 from concierge_service.di.config import Settings
 from concierge_service.domain.sleep import SleepPlanner
+from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
@@ -36,5 +37,6 @@ def build_container(settings: Settings, *, ai_agent: AiAgent | None = None) -> C
         room_api=room_api,
         sleep_planner=SleepPlanner(),
         ai_agent=ai_agent if ai_agent is not None else MockAiAgent(),
+        conversation_store_factory=InMemoryConversationStore,
     )
     return Container(run_case=run_case, http_client=client)

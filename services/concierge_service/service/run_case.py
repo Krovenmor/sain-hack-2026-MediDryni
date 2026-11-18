@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 
-from concierge_service.domain.answers import RunResult, StayAnswer
+from concierge_service.domain.answers import RequestAnswer, RunResult, StayAnswer
 from concierge_service.domain.dataset import DatasetIndex, build_dataset_index
 from concierge_service.domain.sleep import SleepPlanError, SleepPlanner
-from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceHints, ProfileContext
+from concierge_service.ports.ai import (
+    AiAgent,
+    AiAgentError,
+    DialogueMessage,
+    PreferenceHints,
+    ProfileContext,
+    RequestContext,
+)
 from concierge_service.ports.dataset import DatasetSource
 from concierge_service.ports.hack_api import HackApi
 from concierge_service.ports.room import RoomApi, RoomApiError
+from concierge_service.ports.store import ConversationStore
 from concierge_service.service.preference_resolver import resolve_preferences
+from concierge_service.service.request_handler import RequestHandler
 
 logger = logging.getLogger(__name__)
 _RUN_BUDGET_S = 45 * 60
@@ -30,12 +40,15 @@ class RunCase:
         room_api: RoomApi,
         sleep_planner: SleepPlanner,
         ai_agent: AiAgent,
+        conversation_store_factory: Callable[[], ConversationStore],
         preference_timeout_s: float = 60.0,
     ) -> None:
         self._hack_api = hack_api
         self._room_api = room_api
         self._sleep_planner = sleep_planner
         self._ai_agent = ai_agent
+        self._request_handler = RequestHandler(room_api, ai_agent)
+        self._conversation_store_factory = conversation_store_factory
         self._preference_timeout_s = preference_timeout_s
 
     async def run(
@@ -48,7 +61,8 @@ class RunCase:
             dataset_code=dataset_code, token=token
         )
         index = build_dataset_index(parsed.dataset)
-        hints_by_user = await self._extract_preferences(index, parsed.source, deadline=deadline)
+        profiles = _build_profiles(index, parsed.source)
+        hints_by_user = await self._extract_preferences(profiles, deadline=deadline)
         preferences_by_user = {
             user_id: resolve_preferences(user, index.tracks_by_id, hints_by_user.get(user_id))
             for user_id, user in index.users_by_id.items()
@@ -68,34 +82,23 @@ class RunCase:
                 logger.warning("Stay scenario skipped: %s", exc)
                 continue
             answers.append(StayAnswer(stay.record_id, str(session.session_id)))
-        return RunResult(stays=tuple(answers))
+        request_answers = await self._process_requests(
+            index, parsed.source, profiles, hints_by_user, token=token, deadline=deadline
+        )
+        return RunResult(stays=tuple(answers), requests=request_answers)
 
     async def _extract_preferences(
-        self, index: DatasetIndex, source: DatasetSource, *, deadline: float
+        self, profiles: dict[str, ProfileContext], *, deadline: float
     ) -> dict[str, PreferenceHints]:
-        profiles = tuple(
-            ProfileContext(
-                user=source.users_by_id[user_id],
-                events=tuple(
-                    source.events_by_user_and_id[user_id, event.event_id]
-                    for event in index.events_by_user[user_id]
-                ),
-                chat_history=tuple(
-                    source.messages_by_user_and_id[user_id, message.message_id]
-                    for message in index.chat_history_by_user[user_id]
-                ),
-                devices=source.devices,
-                tracks=source.tracks,
-            )
-            for user_id in index.users_by_id
-        )
         budget = min(self._preference_timeout_s, deadline - asyncio.get_running_loop().time())
         if budget <= 0:
             return {}
 
         try:
             async with asyncio.timeout(budget):
-                results = await self._ai_agent.extract_preference_hints(profiles, timeout_s=budget)
+                results = await self._ai_agent.extract_preference_hints(
+                    tuple(profiles.values()), timeout_s=budget
+                )
         except AiAgentError as exc:
             logger.warning("Preference extraction failed: %s", exc.code)
             return {}
@@ -103,7 +106,65 @@ class RunCase:
             logger.warning("Preference extraction timed out")
             return {}
 
-        if tuple(result.user_id for result in results) != tuple(index.users_by_id):
+        if tuple(result.user_id for result in results) != tuple(profiles):
             logger.warning("Preference extraction returned mismatched user IDs")
             return {}
         return {result.user_id: result for result in results if isinstance(result, PreferenceHints)}
+
+    async def _process_requests(
+        self,
+        index: DatasetIndex,
+        source: DatasetSource,
+        profiles: dict[str, ProfileContext],
+        hints: dict[str, PreferenceHints],
+        *,
+        token: str,
+        deadline: float,
+    ) -> tuple[RequestAnswer, ...]:
+        store = self._conversation_store_factory()
+        answers: list[RequestAnswer] = []
+        for user_id, requests in index.requests_by_user.items():
+            for request in requests:
+                context = RequestContext(
+                    profile=profiles[user_id],
+                    request=source.requests_by_id[request.record_id],
+                    stay=source.stays_by_id[request.stay_id],
+                    intents=source.intents,
+                    conversation=store.history(user_id),
+                    preference_hints=hints.get(user_id),
+                )
+                answer = await self._request_handler.handle(
+                    request, context, index.device_fields_by_device, token=token, deadline=deadline
+                )
+                if answer is None:
+                    continue
+                answers.append(answer)
+                utterances = tuple(
+                    DialogueMessage(role="user", at=item.at.isoformat(), text=item.text)
+                    for item in request.utterances
+                )
+                replies = tuple(
+                    DialogueMessage(role=reply.role, at=reply.at, text=reply.text)
+                    for reply in answer.replies
+                )
+                store.append(user_id, utterances + replies)
+        return tuple(answers)
+
+
+def _build_profiles(index: DatasetIndex, source: DatasetSource) -> dict[str, ProfileContext]:
+    return {
+        user_id: ProfileContext(
+            user=source.users_by_id[user_id],
+            events=tuple(
+                source.events_by_user_and_id[user_id, event.event_id]
+                for event in index.events_by_user[user_id]
+            ),
+            chat_history=tuple(
+                source.messages_by_user_and_id[user_id, message.message_id]
+                for message in index.chat_history_by_user[user_id]
+            ),
+            devices=source.devices,
+            tracks=source.tracks,
+        )
+        for user_id in index.users_by_id
+    }

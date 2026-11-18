@@ -14,6 +14,7 @@ import httpx
 
 from concierge_service.domain.dataset import SleepPreferences, User
 from concierge_service.domain.sleep import SleepPlanner
+from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceFailure, PreferenceHints
 from concierge_service.ports.room import RoomApi
@@ -82,6 +83,7 @@ class PreferenceResolverTests(unittest.TestCase):
 class ConciergePreferenceFlowTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.dataset = dataset_payload()
+        self.dataset["requests"] = []
         self.dataset["users"][0]["sleep_preferences"] = None
         self.dataset["users"].append(dict(
             self.dataset["users"][0], user_id="user_2",
@@ -119,6 +121,7 @@ class ConciergePreferenceFlowTests(unittest.IsolatedAsyncioTestCase):
         runner = RunCase(
             self.hack_api, room_api=self.room_api, sleep_planner=SleepPlanner(),
             ai_agent=self.agent, preference_timeout_s=timeout_s,
+            conversation_store_factory=InMemoryConversationStore,
         )
         result = await runner.run(case=2, dataset_code=None, token="synthetic-hack-token")
         self.assertEqual([answer.record_id for answer in result.stays], ["stay_1", "stay_2", "stay_3"])

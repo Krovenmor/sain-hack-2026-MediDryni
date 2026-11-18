@@ -1,16 +1,16 @@
 """Simulator operations used by the concierge."""
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Protocol
 from uuid import UUID
 
-from concierge_service.domain.dataset import JSONScalar
+from concierge_service.domain.action_planner import DevicePatch
+from concierge_service.domain.device_catalog import RoomState
 from concierge_service.domain.scenario import ScenarioStep
 
 RoomKind = Literal["stay", "request"]
-RoomState = Mapping[str, Mapping[str, JSONScalar]]
 
 
 @dataclass(frozen=True)
@@ -59,6 +59,10 @@ class RoomApi(Protocol):
 
     async def load_scenario(
         self, *, session_id: UUID, steps: Sequence[ScenarioStep], token: str
+    ) -> RoomSnapshot: ...
+
+    async def apply_action(
+        self, *, session_id: UUID, patch: DevicePatch, at: datetime, token: str
     ) -> RoomSnapshot: ...
 
     async def get_state(

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from concierge_service.domain.dataset import build_dataset_index
 from concierge_service.domain.sleep import SleepPlanner
+from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.ports.room import RoomApi
@@ -193,7 +194,8 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         room = AsyncMock(spec=RoomApi)
         room.create_session.return_value.session_id = SESSION_ID
         app = create_app(RunCase(
-            self.adapter, room_api=room, sleep_planner=SleepPlanner(), ai_agent=MockAiAgent()
+            self.adapter, room_api=room, sleep_planner=SleepPlanner(), ai_agent=MockAiAgent(),
+            conversation_store_factory=InMemoryConversationStore,
         ))
         self.client = await self.enterAsyncContext(
             httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
@@ -221,10 +223,14 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {
-            "stays": [{"record_id": "stay_1", "session_id": str(SESSION_ID)}],
-            "requests": [],
-        })
+        self.assertEqual(response.json()["stays"], [
+            {"record_id": "stay_1", "session_id": str(SESSION_ID)}
+        ])
+        request_answer, = response.json()["requests"]
+        self.assertEqual(request_answer["record_id"], "request_1")
+        self.assertEqual([reply["response_class"] for reply in request_answer["replies"]], [
+            "refused", "refused",
+        ])
         request, = self.get_data_requests
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.path, "/case/2/getData")
