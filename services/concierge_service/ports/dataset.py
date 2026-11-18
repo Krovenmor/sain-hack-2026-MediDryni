@@ -9,9 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from pydantic import JsonValue
+
 from concierge_service.domain.dataset import Case2Dataset
 
-JSONObject = dict[str, object]
+JSONObject = dict[str, JsonValue]
 
 
 @dataclass(frozen=True)

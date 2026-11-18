@@ -17,6 +17,7 @@ from concierge_service.domain.sleep import (
     resolve_bedtime,
 )
 from concierge_service.infra.hack_api import HackApiAdapter
+from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.ports.room import RoomApiError
 from concierge_service.service.preference_resolver import resolve_preferences
@@ -253,6 +254,7 @@ class ScenarioRunTests(unittest.IsolatedAsyncioTestCase):
                 HackApiAdapter(base_url="https://hack.test", client=upstream),
                 room_api=RoomApiAdapter(base_url="https://hack.test", client=upstream),
                 sleep_planner=SleepPlanner(),
+                ai_agent=MockAiAgent(),
             ))
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), base_url="http://test"

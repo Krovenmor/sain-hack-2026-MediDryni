@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from concierge_service.domain.dataset import build_dataset_index
 from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.hack_api import HackApiAdapter
+from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.ports.room import RoomApi
 from concierge_service.service.run_case import RunCase
 from concierge_service.transport.http.app import create_app
@@ -191,7 +192,9 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         self.adapter = HackApiAdapter(base_url="https://hack.test", client=upstream)
         room = AsyncMock(spec=RoomApi)
         room.create_session.return_value.session_id = SESSION_ID
-        app = create_app(RunCase(self.adapter, room_api=room, sleep_planner=SleepPlanner()))
+        app = create_app(RunCase(
+            self.adapter, room_api=room, sleep_planner=SleepPlanner(), ai_agent=MockAiAgent()
+        ))
         self.client = await self.enterAsyncContext(
             httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
         )
