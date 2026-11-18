@@ -1,3 +1,4 @@
 # Документация остаётся в Git, но не попадает в архив деплоя.
 /docs export-ignore
 *.md export-ignore
+/services/ai_service/prompts/*.md -export-ignore
