@@ -13,6 +13,7 @@ from run_telemetry import log_event
 
 Result = TypeVar("Result")
 _RETRY_INSTRUCTION = load_prompt("retry_invalid.md")
+_DEFAULT_RATE_LIMIT_BACKOFF_S = 30.0
 logger = logging.getLogger(__name__)
 
 
@@ -59,6 +60,7 @@ class LimitedCompletions:
                         outcome = "interrupted"
                         tokens = None
                         reason = finish_reason = http_status = None
+                        rate_limit_delay = None
                         try:
                             completion = await self._client.complete(
                                 messages, max_tokens=attempt_max_tokens, timeout_s=remaining
@@ -85,9 +87,8 @@ class LimitedCompletions:
                                 delay = (
                                     error.retry_after_s if isinstance(error, LlmClientError) else None
                                 )
-                                self._next_start = max(
-                                    self._next_start, clock() + (2 if delay is None else delay)
-                                )
+                                rate_limit_delay = _DEFAULT_RATE_LIMIT_BACKOFF_S if delay is None else delay
+                                self._next_start = max(self._next_start, clock() + rate_limit_delay)
                                 if retry_rate_limit and self._next_start < deadline:
                                     retry_rate_limit = False
                                     continue
@@ -113,6 +114,7 @@ class LimitedCompletions:
                                 logger, "llm_attempt", operation=operation, attempt=attempt,
                                 outcome=outcome, total_tokens=tokens,
                                 reason=reason, finish_reason=finish_reason, http_status=http_status,
+                                rate_limit_delay_s=rate_limit_delay,
                                 max_tokens=attempt_max_tokens,
                                 duration_ms=round((clock() - started) * 1000),
                             )

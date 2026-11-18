@@ -85,9 +85,34 @@ class LlmClient:
                 retry_after_s=_retry_after_seconds(response.headers.get("Retry-After")),
                 http_status=response.status_code,
             )
+        if _request_too_large(response):
+            raise LlmClientError(
+                "unavailable", http_status=response.status_code, reason="request_too_large"
+            )
         if not response.is_success:
             raise LlmClientError("unavailable", http_status=response.status_code)
         return _parse_completion(response)
+
+
+def _request_too_large(response: httpx.Response) -> bool:
+    if response.status_code == 413:
+        return True
+    if response.status_code != 400:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return False
+    if error.get("code") in ("context_length_exceeded", "max_tokens_exceeded", "request_too_large"):
+        return True
+    message = str(error.get("message", "")).lower()
+    return any(phrase in message for phrase in (
+        "maximum context length", "exceeds the context", "too many tokens",
+        "max_tokens is too large", "max_tokens must be less than",
+    ))
 
 
 def _parse_completion(response: httpx.Response) -> LlmCompletion:

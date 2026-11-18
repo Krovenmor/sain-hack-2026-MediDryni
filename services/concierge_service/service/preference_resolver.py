@@ -32,7 +32,8 @@ def resolve_preferences(
     gentle_alarm = any(_GENTLE_ALARM.search(dislike) for dislike in dislikes or ())
 
     if hints is not None:
-        temperature = temperature or _value(hints.temperature)
+        if temperature is None:
+            temperature = _bedtime_temperature_category(hints) or _value(hints.temperature)
         if tracks is None:
             tracks = _value(hints.favorite_track_ids)
         if light_sensitive is None:
@@ -54,6 +55,19 @@ def resolve_preferences(
 
 
 T = TypeVar("T")
+
+
+def _bedtime_temperature_category(hints: PreferenceHints) -> str | None:
+    values = [
+        setting.value for setting in hints.settings
+        if setting.context == "bedtime" and setting.device_id == "climate"
+        and setting.field_id == "temperature_c" and type(setting.value) in (int, float)
+    ]
+    if values:
+        for category, midpoint in _TEMPERATURES.items():
+            if all(midpoint - 0.5 <= value <= midpoint + 0.5 for value in values):
+                return category
+    return None
 
 
 def _value(hint: Hint[T] | None) -> T | None:

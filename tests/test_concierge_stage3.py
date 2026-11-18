@@ -19,7 +19,7 @@ from concierge_service.domain.dataset import SleepPreferences, User
 from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
-from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceFailure, PreferenceHints
+from concierge_service.ports.ai import AiAgent, AiAgentError, ObservedSetting, PreferenceFailure, PreferenceHints
 from concierge_service.ports.room import RoomApi
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.run_case import RunCase
@@ -82,6 +82,25 @@ class PreferenceResolverTests(unittest.TestCase):
             resolve_preferences(self.user, {"track_1"}, preference_hints(self.user.user_id)),
             resolve_preferences(self.user, {"track_1"}),
         )
+
+    def test_only_consistent_bedtime_temperatures_refine_the_model_category(self) -> None:
+        guest = replace(self.user, sleep_preferences=None)
+        hints = preference_hints(guest.user_id, temperature="cool")
+        for observations, expected in (
+            ([("bedtime", 19.5), ("home", 22)], 19.5),
+            ([("bedtime", 19), ("bedtime", 20)], 19.5),
+            ([("bedtime", 20), ("bedtime", 21)], 17.5),
+            ([("bedtime", 20.5)], 17.5),
+            ([("wake_up", 20)], 17.5),
+        ):
+            with self.subTest(observations=observations):
+                settings = [ObservedSetting.model_validate({
+                    "context": scope, "observed_at": None, "device_id": "climate",
+                    "field_id": "temperature_c", "value": value, "sources": [source()],
+                }) for scope, value in observations]
+                observed = hints.model_copy(update={"settings": settings})
+                self.assertEqual(resolve_preferences(guest, (), observed).night_temperature, expected)
+                self.assertEqual(resolve_preferences(self.user, (), observed).night_temperature, 17.5)
 
 
 class ConciergePreferenceFlowTests(unittest.IsolatedAsyncioTestCase):

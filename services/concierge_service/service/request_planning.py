@@ -213,6 +213,12 @@ def _history_values(
         if scope in ("bedtime", "wake_up") and setting.device_id == "alarm":
             skipped[f"{scope}_alarm"] += 1
             continue
+        if (
+            scope == "wake_up" and (setting.device_id, setting.field_id) == ("dnd", "enabled")
+            and setting.value is not False
+        ):
+            skipped["wake_up_dnd"] += 1
+            continue
 
         if setting.observed_at is None:
             if target_day is not None:

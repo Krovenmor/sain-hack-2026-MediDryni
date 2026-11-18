@@ -214,13 +214,13 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(agent.usage()["attempts"], 1)
 
     async def test_rate_limit_retries_once_only_within_deadline(self):
-        for retry_after, attempts in (("0", 2), ("120", 1)):
+        for retry_after, attempts in (("0", 2), ("120", 1), (None, 1)):
             with self.subTest(retry_after=retry_after):
                 agent = self.make_agent(lambda request: httpx.Response(
-                    429, headers={"Retry-After": retry_after}
+                    429, headers={"Retry-After": retry_after} if retry_after is not None else {}
                 ))
                 with self.assertRaisesRegex(AiAgentError, "^rate_limited$"):
-                    await agent.interpret_request(request_context("Теплее"), timeout_s=1)
+                    await agent.interpret_request(request_context("Теплее"), timeout_s=3)
                 self.assertEqual(agent.usage()["attempts"], attempts)
 
     async def test_requests_and_preferences_share_rate_budget(self):

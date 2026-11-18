@@ -207,6 +207,7 @@ class ExtendedActionTests(unittest.TestCase):
             observation("light", "color_temperature_k", 3000, None, scope="wake_up"),
             observation("curtains", "position", 100, None, scope="bedtime"),
             observation("alarm", "mode", "unsupported_mode", None, scope="wake_up"),
+            observation("dnd", "enabled", True, None, scope="wake_up"),
             observation("alarm", "window_minutes", 15, None, scope="wake_up"),
         ]})
         self.context = replace(self.context, preference_hints=hints)

@@ -267,3 +267,32 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(budgets, [30_000, 10_000, 10_000, 10_000])
         self.assertEqual(results, [PreferenceHints.model_validate(hints(user_id)) for user_id in user_ids])
+
+    async def test_http_size_errors_split_a_batch_but_other_http_errors_end_it(self):
+        for status, error, split in (
+            (413, {}, True),
+            (400, {"code": "context_length_exceeded"}, True),
+            (400, {"message": "max_tokens must be less than 16385"}, True),
+            (400, {"message": "unsupported parameter"}, False),
+            (401, {}, False),
+            (503, {}, False),
+        ):
+            with self.subTest(status=status, error=error):
+                budgets = []
+
+                def handle(request):
+                    body = json.loads(request.content)
+                    budgets.append(body["max_tokens"])
+                    payload = json.loads(body["messages"][1]["content"])
+                    if isinstance(payload, list):
+                        return httpx.Response(status, json={"error": error})
+                    return completion(hints(payload["user"]["user_id"]))
+
+                users = ["first", "second"]
+                agent = self.make_agent(handle, batch_size=2)
+                results = await agent.extract_preference_hints([profile(u) for u in users], timeout_s=1)
+                self.assertEqual(budgets, [20_000, 10_000, 10_000] if split else [20_000])
+                self.assertEqual(results, [
+                    PreferenceHints.model_validate(hints(u)) if split
+                    else PreferenceFailure(user_id=u, error="unavailable") for u in users
+                ])

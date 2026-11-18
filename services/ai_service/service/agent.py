@@ -12,7 +12,7 @@ from concierge_service.ports.ai import (
     RequestInterpretation,
 )
 
-from ai_service.infra.llm_client import LlmClient
+from ai_service.infra.llm_client import LlmClient, LlmClientError
 from ai_service.service.context import compact_json
 from ai_service.service.limits import LimitedCompletions
 from ai_service.service.preferences import (
@@ -64,7 +64,8 @@ class LlmAgent:
                     retry_invalid=False,
                 )
             except AiAgentError as error:
-                if error.code != "invalid_response":
+                size_error = isinstance(error, LlmClientError) and error.reason == "request_too_large"
+                if error.code != "invalid_response" and not size_error:
                     results.extend(
                         PreferenceFailure(user_id=item.user_id, error=error.code) for item in batch
                     )
