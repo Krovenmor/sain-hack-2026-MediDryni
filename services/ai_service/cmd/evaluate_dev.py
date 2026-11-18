@@ -2,7 +2,9 @@ import argparse
 import asyncio
 import json
 import os
-from collections import Counter
+from collections import Counter, defaultdict
+from datetime import datetime
+from itertools import islice, zip_longest
 from pathlib import Path
 from time import monotonic
 
@@ -14,6 +16,7 @@ from concierge_service.ports.ai import (
     AiAgent,
     AiAgentError,
     DialogueMessage,
+    JsonObject,
     PreferenceHints,
     ProfileContext,
     RequestContext,
@@ -42,11 +45,10 @@ async def evaluate(
     expected = {
         item["record_id"]: item["intent_id"] for item in reference["requests"]
     }
-    requests = dataset["requests"][:max_requests]
-    user_ids = list(dict.fromkeys(item["user_id"] for item in requests))[:max_users]
+    requests = _sample_requests(dataset["requests"], max_users, max_requests)
+    user_ids = list(dict.fromkeys(item["user_id"] for item in requests))
     if not user_ids:
         user_ids = [user["user_id"] for user in dataset["users"][:max_users]]
-    selected_ids = set(user_ids)
     users = {user["user_id"]: user for user in dataset["users"]}
     stays = {stay["record_id"]: stay for stay in dataset["stays"]}
     profiles = {
@@ -73,8 +75,6 @@ async def evaluate(
     errors: Counter[str] = Counter()
     for item in requests:
         user_id = item["user_id"]
-        if user_id not in selected_ids:
-            continue
         context = RequestContext(
             profile=profiles[user_id],
             request=item,
@@ -99,11 +99,28 @@ async def evaluate(
         "preference_successes": len(hints),
         "preference_seconds": round(preference_seconds, 2),
         "requests": scores["requests"],
+        "request_users": len(conversations) if requests else 0,
         "intent_matches": scores["intent_matches"],
         "request_errors": dict(errors),
         "elapsed_seconds": round(monotonic() - started, 2),
         **agent.usage(),
     }
+
+
+def _sample_requests(
+    requests: list[JsonObject], max_users: int, max_requests: int,
+) -> list[JsonObject]:
+    by_user: dict[object, list[JsonObject]] = defaultdict(list)
+    for request in requests:
+        by_user[request["user_id"]].append(request)
+
+    selected = list(islice(by_user.values(), max_users))
+    for items in selected:
+        items.sort(key=lambda item: datetime.fromisoformat(str(item["at"])))
+    interleaved = (
+        request for group in zip_longest(*selected) for request in group if request is not None
+    )
+    return list(islice(interleaved, max_requests))
 
 
 async def _run(max_users: int, max_requests: int, dataset_file: Path | None) -> dict:

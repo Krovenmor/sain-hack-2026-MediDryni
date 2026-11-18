@@ -5,9 +5,11 @@ from typing import TypeVar
 from concierge_service.ports.ai import AiAgentError
 
 from ai_service.infra.llm_client import LlmClient, LlmClientError
+from ai_service.prompts import load_prompt
 
 
 Result = TypeVar("Result")
+_RETRY_INSTRUCTION = load_prompt("retry_invalid.md")
 
 
 class LimitedCompletions:
@@ -72,10 +74,7 @@ class LimitedCompletions:
                                 messages = [
                                     {
                                         "role": "system",
-                                        "content": messages[0]["content"] + (
-                                            "\nПредыдущий результат не прошёл проверку. "
-                                            "Проверь схему, ID и ссылки; верни только корректный JSON."
-                                        ),
+                                        "content": f"{messages[0]['content']}\n{_RETRY_INSTRUCTION}",
                                     },
                                     *messages[1:],
                                 ]
