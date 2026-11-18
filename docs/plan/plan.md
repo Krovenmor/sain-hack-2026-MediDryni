@@ -39,7 +39,8 @@
 services/
   concierge_service/
     cmd/api/main.py          # только создание ASGI app
-    di/container.py          # конфигурация и ручная сборка зависимостей
+    di/config.py             # настройки из окружения
+    di/container.py          # ручная сборка зависимостей
     transport/http/          # online: /run, /health; позже: demo API
     domain/                  # модели, R1–R8, SleepPlanner, ActionPlanner
     ports/
