@@ -12,7 +12,7 @@ help:
 		'make test  Run the unittest suite'
 
 docs:
-	DISPLAY= $(PLANTUML) -charset UTF-8 -tsvg docs/plan/c2-component.puml
+	DISPLAY= $(PLANTUML) -nometadata -charset UTF-8 -tsvg docs/plan/c2-component.puml
 
 run:
 	sh start.sh
