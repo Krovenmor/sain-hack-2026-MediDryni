@@ -5,21 +5,21 @@ from unittest.mock import patch
 
 import httpx
 
-from ai_service.evaluate_dev import evaluate
+from ai_service.cmd.evaluate_dev import evaluate
 from ai_service.service.agent import LlmAgent
 
 
 DATASET_FILE = Path(__file__).resolve().parents[1] / "docs" / "data" / "dataset.json"
 MODEL_REPLIES = {
     "rq_06f827d9af": ("warmer", {"mode": "relative", "amount": None}),
-    "rq_aec3456954": ("out_of_scope", {}),
-    "rq_6c05184bc3": ("brighter", {"mode": "relative", "amount": None}),
-    "rq_af421a5f94": ("do_not_disturb", {"enabled": True}),
-    "rq_85f7a82006": ("like_yesterday", {}),
-    "rq_88fc0118f4": ("quieter", {"mode": "relative", "amount": None}),
-    "rq_4d1cf94f83": ("alarm_set", {"target_at": "2026-11-13T09:00:00+03:00"}),
-    "rq_3727d7acea": ("alarm_cancel", {}),
     "rq_d5e18fe9a0": ("curtains", {"position": 0}),
+    "rq_aec3456954": ("out_of_scope", {}),
+    "rq_ed02c4c656": ("cooler", {"mode": "relative", "amount": None}),
+    "rq_6c05184bc3": ("brighter", {"mode": "relative", "amount": None}),
+    "rq_e0aa0bda90": ("out_of_scope", {}),
+    "rq_af421a5f94": ("do_not_disturb", {"enabled": True}),
+    "rq_cc67a3daa9": ("like_home", {}),
+    "rq_85f7a82006": ("like_yesterday", {}),
 }
 
 
@@ -90,7 +90,7 @@ class AiOfficialDatasetTests(unittest.IsolatedAsyncioTestCase):
             "LLM_MODEL": "test-model",
         }
         with patch.dict("os.environ", env, clear=True), patch(
-            "ai_service.evaluate_dev.LlmAgent",
+            "ai_service.cmd.evaluate_dev.LlmAgent",
             side_effect=lambda client: LlmAgent(client, requests_per_minute=60000),
         ):
             async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
@@ -101,6 +101,7 @@ class AiOfficialDatasetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, list(MODEL_REPLIES))
         self.assertEqual(report["preference_successes"], 2)
         self.assertEqual(report["requests"], 9)
+        self.assertEqual(report["request_users"], 2)
         self.assertEqual(report["intent_matches"], 9)
         self.assertEqual(report["request_errors"], {})
         self.assertEqual(report["attempts"], len(preference_calls) + len(calls))

@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import httpx
 
-from ai_service.check_proxy import check
+from ai_service.cmd.check_proxy import check
 from ai_service.infra.llm_client import LlmClient, LlmClientError
 
 

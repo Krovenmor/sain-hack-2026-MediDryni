@@ -80,6 +80,7 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 "hotel_timezone": "Europe/Moscow",
                 "devices": [device],
                 "tracks": item.profile.tracks,
+                "conversation": [old.model_dump()],
             })
             return completion(json.dumps({
                 "record_id": "request_1", "intent": "warmer",
@@ -220,6 +221,25 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(AiAgentError, "^unresolved_reference$"):
             await self.make_agent(handle).interpret_request(item, timeout_s=1)
+
+    async def test_implicit_follow_up_receives_the_last_two_dialogue_messages(self):
+        item = request_context("А можно поменьше?")
+        old = DialogueMessage(role="user", at=AT, text="Закрой шторы")
+        recent = [
+            DialogueMessage(role="user", at=AT, text="Добавь яркости свету"),
+            DialogueMessage(role="agent", at=AT, text="Изменил яркость света."),
+        ]
+        item = replace(item, conversation=[old, *recent])
+
+        def handle(request):
+            payload = json.loads(json.loads(request.content)["messages"][1]["content"])
+            self.assertEqual(payload["conversation"], [message.model_dump() for message in recent])
+            return completion(
+                '{"record_id":"request_1","intent":"dimmer","slots":{"mode":"relative","amount":null}}'
+            )
+
+        result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
+        self.assertEqual(result.intent, "dimmer")
 
     async def test_yesterday_keeps_matching_stay_note_ahead_of_later_notes(self):
         item = request_context("Сделай как вчера")

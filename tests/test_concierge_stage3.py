@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+import json
 import unittest
 from dataclasses import replace
 from datetime import time
@@ -12,6 +13,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from ai_service.infra.llm_client import LlmClient
+from ai_service.service.agent import LlmAgent
 from concierge_service.domain.dataset import SleepPreferences, User
 from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.conversation_store import InMemoryConversationStore
@@ -21,6 +24,7 @@ from concierge_service.ports.room import RoomApi
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.run_case import RunCase
 from test_concierge_stage1 import dataset_payload
+from test_preference_extraction import completion, hints, source
 
 
 def preference_hints(user_id: str, **values: object) -> PreferenceHints:
@@ -221,3 +225,34 @@ class ConciergePreferenceFlowTests(unittest.IsolatedAsyncioTestCase):
         call = self.agent.extract_preference_hints.await_args
         self.assertGreater(call.kwargs["timeout_s"], 0)
         self.assertLess(call.kwargs["timeout_s"], 10)
+
+    async def test_agent_returns_completed_hints_when_a_later_profile_times_out(self) -> None:
+        self.dataset["users"][1]["sleep_preferences"] = None
+        cancelled = asyncio.Event()
+
+        async def mock_proxy(request: httpx.Request) -> httpx.Response:
+            messages = json.loads(request.content)["messages"]
+            profile = json.loads(messages[1]["content"])
+            if profile["user"]["user_id"] == "user_1":
+                return completion(hints("user_1", temperature={
+                    "value": "warm", "sources": [source(source_id="event_1")],
+                }))
+            try:
+                await asyncio.sleep(60)
+            finally:
+                cancelled.set()
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(mock_proxy)) as proxy:
+            agent = LlmAgent(
+                LlmClient(proxy, base_url="https://test.invalid", api_key="test", model="test"),
+                requests_per_minute=60000, preference_batch_size=1,
+            )
+            runner = RunCase(
+                self.hack_api, room_api=self.room_api, sleep_planner=SleepPlanner(),
+                ai_agent=agent, preference_timeout_s=0.1,
+                conversation_store_factory=InMemoryConversationStore,
+            )
+            await runner.run(case=2, dataset_code=None, token="synthetic-hack-token")
+
+        self.assertTrue(cancelled.is_set())
+        self.assertEqual(self._temperatures(), [21.5, 21.5, 19.5])

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import httpx
 
-from ai_service.evaluate_dev import evaluate
+from ai_service.cmd.evaluate_dev import evaluate
 from ai_service.service.agent import LlmAgent
 
 
@@ -64,7 +64,7 @@ class AiEvaluateDevTests(unittest.IsolatedAsyncioTestCase):
             "LLM_MODEL": "model",
         }
         with patch.dict("os.environ", env), patch(
-            "ai_service.evaluate_dev.LlmAgent",
+            "ai_service.cmd.evaluate_dev.LlmAgent",
             side_effect=lambda client: LlmAgent(client, requests_per_minute=60000),
         ):
             async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
