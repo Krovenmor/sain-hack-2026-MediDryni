@@ -7,7 +7,9 @@ from dataclasses import dataclass
 import httpx
 
 from concierge_service.di.config import Settings
+from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.hack_api import HackApiAdapter
+from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.service.run_case import RunCase
 
 
@@ -26,4 +28,6 @@ def build_container(settings: Settings) -> Container:
         follow_redirects=False,
     )
     hack_api = HackApiAdapter(base_url=settings.hack_api_url, client=client)
-    return Container(run_case=RunCase(hack_api), http_client=client)
+    room_api = RoomApiAdapter(base_url=settings.hack_api_url, client=client)
+    run_case = RunCase(hack_api, room_api=room_api, sleep_planner=SleepPlanner())
+    return Container(run_case=run_case, http_client=client)

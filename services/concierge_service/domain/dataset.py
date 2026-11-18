@@ -7,7 +7,7 @@ external Hack API JSON shape.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Hashable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from typing import Literal, TypeVar
@@ -184,9 +184,9 @@ def build_dataset_index(dataset: Case2Dataset) -> DatasetIndex:
     tracks_by_id = _unique_by_id(dataset.tracks, lambda track: track.track_id, "tracks")
     intents_by_id = _unique_by_id(dataset.intents, lambda intent: intent.intent_id, "intents")
     rules_by_id = _unique_by_id(dataset.sleep_rules, lambda rule: rule.rule_id, "sleep_rules")
-    _unique_by_id(dataset.events, lambda event: event.event_id, "events")
+    _unique_by_id(dataset.events, lambda event: (event.user_id, event.event_id), "events")
     _unique_by_id(
-        dataset.chat_history, lambda message: message.message_id, "chat_history"
+        dataset.chat_history, lambda message: (message.user_id, message.message_id), "chat_history"
     )
 
     if intents_by_id.keys() != EXPECTED_INTENT_IDS:
@@ -236,13 +236,14 @@ def build_dataset_index(dataset: Case2Dataset) -> DatasetIndex:
 
 
 T = TypeVar("T")
+RecordKey = TypeVar("RecordKey", bound=Hashable)
 UserRecord = TypeVar("UserRecord", Event, ChatMessage, Stay, Request)
 
 
 def _unique_by_id(
-    records: Iterable[T], key: Callable[[T], str], label: str
-) -> dict[str, T]:
-    result: dict[str, T] = {}
+    records: Iterable[T], key: Callable[[T], RecordKey], label: str
+) -> dict[RecordKey, T]:
+    result: dict[RecordKey, T] = {}
     for record in records:
         record_id = key(record)
         if record_id in result:

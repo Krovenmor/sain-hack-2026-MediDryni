@@ -62,8 +62,12 @@ class HackApiAdapter:
             dataset=_to_domain(payload),
             source=DatasetSource(
                 users_by_id={row["user_id"]: row for row in raw_dataset["users"]},
-                events_by_id={row["event_id"]: row for row in raw_dataset["events"]},
-                messages_by_id={row["message_id"]: row for row in raw_dataset["chat_history"]},
+                events_by_user_and_id={
+                    (row["user_id"], row["event_id"]): row for row in raw_dataset["events"]
+                },
+                messages_by_user_and_id={
+                    (row["user_id"], row["message_id"]): row for row in raw_dataset["chat_history"]
+                },
                 stays_by_id={row["record_id"]: row for row in raw_dataset["stays"]},
                 requests_by_id={row["record_id"]: row for row in raw_dataset["requests"]},
                 devices=tuple(raw_dataset["devices"]),

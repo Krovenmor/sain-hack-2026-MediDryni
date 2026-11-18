@@ -1,39 +1,23 @@
 """Wire types for the Hack API Case2Dataset response."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
     AfterValidator,
-    AwareDatetime,
-    BaseModel,
     BeforeValidator,
-    ConfigDict,
     Field,
     InstanceOf,
     JsonValue,
-    TypeAdapter,
 )
 
 from concierge_service.domain.dataset import JSONScalar
+from concierge_service.infra.wire import Identifier, RoomState, Timestamp, WireModel
 
-Identifier = Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")]
+
 Text = Annotated[str, Field(min_length=1)]
 ClockTime = Annotated[str, Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9]$")]
-OffsetText = Annotated[
-    str,
-    Field(
-        pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
-        r"(\.[0-9]+)?[+-]([01][0-9]|2[0-3]):[0-5][0-9]$"
-    ),
-]
-_offset_text = TypeAdapter(OffsetText)
-_aware_datetime = TypeAdapter(AwareDatetime)
-
-
-def _parse_timestamp(value: object) -> datetime:
-    return _aware_datetime.validate_python(_offset_text.validate_python(value, strict=True))
 
 
 def _parse_timezone(value: object) -> ZoneInfo:
@@ -56,7 +40,6 @@ def _validate_date(value: str) -> str:
     return value
 
 
-Timestamp = Annotated[AwareDatetime, BeforeValidator(_parse_timestamp)]
 Timezone = Annotated[InstanceOf[ZoneInfo], BeforeValidator(_parse_timezone)]
 DateText = Annotated[
     str, Field(pattern=r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"), AfterValidator(_validate_date)
@@ -73,12 +56,6 @@ WidgetId = Literal[
     "workout_suggest", "meal_log", "habit_check", "diary_prompt", "wind_down",
     "weekly_trend", "restart_card",
 ]
-
-
-class WireModel(BaseModel):
-    model_config = ConfigDict(
-        strict=True, extra="forbid", allow_inf_nan=False, hide_input_in_errors=True
-    )
 
 
 class MetaPayload(WireModel):
@@ -279,15 +256,12 @@ class UtterancePayload(WireModel):
     text: Text
 
 
-DeviceState = Annotated[dict[Identifier, JSONScalar], Field(min_length=1)]
-
-
 class RequestPayload(WireModel):
     record_id: Identifier
     user_id: Identifier
     stay_id: Identifier
     at: Timestamp
-    initial_state: Annotated[dict[Identifier, DeviceState], Field(min_length=1)]
+    initial_state: RoomState
     utterances: Annotated[list[UtterancePayload], Field(min_length=1, max_length=2)]
 
 

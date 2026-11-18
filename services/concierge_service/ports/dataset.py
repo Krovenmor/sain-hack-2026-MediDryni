@@ -17,8 +17,8 @@ JSONObject = dict[str, object]
 @dataclass(frozen=True)
 class DatasetSource:
     users_by_id: Mapping[str, JSONObject]
-    events_by_id: Mapping[str, JSONObject]
-    messages_by_id: Mapping[str, JSONObject]
+    events_by_user_and_id: Mapping[tuple[str, str], JSONObject]
+    messages_by_user_and_id: Mapping[tuple[str, str], JSONObject]
     stays_by_id: Mapping[str, JSONObject]
     requests_by_id: Mapping[str, JSONObject]
     devices: tuple[JSONObject, ...]

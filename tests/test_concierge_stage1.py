@@ -2,13 +2,17 @@
 
 import copy
 import unittest
+from unittest.mock import AsyncMock
+from uuid import UUID
 from datetime import time, timedelta
 
 import httpx
 from pydantic import ValidationError
 
 from concierge_service.domain.dataset import build_dataset_index
+from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.hack_api import HackApiAdapter
+from concierge_service.ports.room import RoomApi
 from concierge_service.service.run_case import RunCase
 from concierge_service.transport.http.app import create_app
 from concierge_service.transport.http.schemas import Case2Answers
@@ -20,6 +24,54 @@ INTENT_IDS = (
     "going_to_bed", "woke_up", "like_yesterday", "do_not_disturb",
     "like_home", "out_of_scope", "invalid_value", "medical",
 )
+
+
+SESSION_ID = UUID("11111111-1111-1111-1111-111111111111")
+
+
+def device_catalog_payload() -> list[dict]:
+    device_fields = {
+        "light": [
+            ("brightness", {"type": "integer", "minimum": 0, "maximum": 100}, 0),
+            ("color_temperature_k", {"type": "integer", "minimum": 2200, "maximum": 6500}, 4000),
+        ],
+        "climate": [
+            ("temperature_c", {"type": "number", "minimum": 16, "maximum": 26}, 23),
+        ],
+        "sound": [
+            ("track_id", {"type": "string"}, "track_1"),
+            ("volume", {"type": "integer", "minimum": 0, "maximum": 100}, 20),
+            ("timer_minutes", {"type": "integer", "minimum": 0, "maximum": 1440}, 0),
+        ],
+        "curtains": [
+            ("position", {"type": "integer", "minimum": 0, "maximum": 100}, 100),
+        ],
+        "alarm": [
+            ("at", {"type": ["string", "null"], "format": "date-time"}, None),
+            ("mode", {"enum": ["light", "sound", "both"]}, "both"),
+            ("window_minutes", {"type": "integer", "minimum": 0, "maximum": 30}, 0),
+        ],
+        "dnd": [
+            ("enabled", {"type": "boolean"}, False),
+        ],
+    }
+    return [
+        {
+            "device_id": device_id,
+            "title": device_id,
+            "fields": [
+                {
+                    "field_id": field_id,
+                    "description": field_id,
+                    "value_schema": schema,
+                    "default_value": default,
+                    "unit": None,
+                }
+                for field_id, schema, default in fields
+            ],
+        }
+        for device_id, fields in device_fields.items()
+    ]
 
 
 def dataset_payload() -> dict:
@@ -109,21 +161,7 @@ def dataset_payload() -> dict:
                 ],
             }
         ],
-        "devices": [
-            {
-                "device_id": "light",
-                "title": "Свет",
-                "fields": [
-                    {
-                        "field_id": "brightness",
-                        "description": "Яркость",
-                        "value_schema": {"type": "integer", "minimum": 0, "maximum": 100},
-                        "default_value": 0,
-                        "unit": "%",
-                    }
-                ],
-            }
-        ],
+        "devices": device_catalog_payload(),
         "tracks": [
             {"track_id": f"track_{index}", "title": f"Трек {index}"}
             for index in range(1, 13)
@@ -151,7 +189,9 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
             httpx.AsyncClient(transport=httpx.MockTransport(self._get_data))
         )
         self.adapter = HackApiAdapter(base_url="https://hack.test", client=upstream)
-        app = create_app(RunCase(self.adapter))
+        room = AsyncMock(spec=RoomApi)
+        room.create_session.return_value.session_id = SESSION_ID
+        app = create_app(RunCase(self.adapter, room_api=room, sleep_planner=SleepPlanner()))
         self.client = await self.enterAsyncContext(
             httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
         )
@@ -178,7 +218,10 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"stays": [], "requests": []})
+        self.assertEqual(response.json(), {
+            "stays": [{"record_id": "stay_1", "session_id": str(SESSION_ID)}],
+            "requests": [],
+        })
         request, = self.get_data_requests
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.path, "/case/2/getData")
@@ -225,9 +268,40 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.at.utcoffset(), timedelta(hours=3))
         self.assertEqual(parsed.source.requests_by_id["request_1"], self.payload["requests"][0])
         self.assertEqual(parsed.source.users_by_id["user_1"], self.payload["users"][0])
-        self.assertEqual(parsed.source.events_by_id["event_1"], self.payload["events"][0])
-        self.assertEqual(parsed.source.messages_by_id["message_1"], self.payload["chat_history"][0])
+        self.assertEqual(
+            parsed.source.events_by_user_and_id["user_1", "event_1"], self.payload["events"][0]
+        )
+        self.assertEqual(
+            parsed.source.messages_by_user_and_id["user_1", "message_1"],
+            self.payload["chat_history"][0],
+        )
         self.assertFalse(hasattr(parsed, "reference"))
+
+    async def test_event_and_message_ids_are_scoped_to_the_user(self) -> None:
+        self.payload["users"].append(dict(self.payload["users"][0], user_id="user_2"))
+        self.payload["events"].append(dict(
+            self.payload["events"][0], user_id="user_2", payload={"text": "another event"},
+        ))
+        self.payload["chat_history"].append(dict(
+            self.payload["chat_history"][0], user_id="user_2", text="another message",
+        ))
+        parsed = await self.adapter.get_case2_data(dataset_code=None, token="run-token")
+        index = build_dataset_index(parsed.dataset)
+
+        for position, user_id in enumerate(("user_1", "user_2")):
+            self.assertEqual(index.events_by_user[user_id][0].event_id, "event_1")
+            self.assertEqual(index.chat_history_by_user[user_id][0].message_id, "message_1")
+            self.assertEqual(
+                parsed.source.events_by_user_and_id[user_id, "event_1"],
+                self.payload["events"][position],
+            )
+            self.assertEqual(
+                parsed.source.messages_by_user_and_id[user_id, "message_1"],
+                self.payload["chat_history"][position],
+            )
+
+        self.payload["chat_history"].append(copy.deepcopy(self.payload["chat_history"][0]))
+        self.assertEqual((await self._run()).status_code, 502)
 
     async def test_index_orders_user_records_by_instant_and_preserves_ties(self) -> None:
         earlier = copy.deepcopy(self.payload["requests"][0])
