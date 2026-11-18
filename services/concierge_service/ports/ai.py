@@ -232,10 +232,26 @@ class InvalidValueInterpretation(InterpretationBase):
     slots: InvalidValueSlots
 
 
+class PastSettingsSlots(DTO):
+    """Relative lookback for the single external `like_yesterday` intent.
+
+    `None` keeps the default meaning "yesterday". Explicit N supports the
+    same general intent expressed as "N days ago" or a past stay whose date
+    is known. It is not a new intent.
+    """
+
+    days_ago: Annotated[int, Field(ge=0)] | None = None
+
+
+class PastSettingsInterpretation(InterpretationBase):
+    intent: Literal["like_yesterday"]
+    slots: PastSettingsSlots
+
+
 class NoSlotsInterpretation(InterpretationBase):
     intent: Literal[
         "all_off", "alarm_cancel", "going_to_bed", "woke_up",
-        "like_yesterday", "like_home", "out_of_scope", "medical",
+        "like_home", "out_of_scope", "medical",
     ]
     slots: EmptySlots
 
@@ -244,7 +260,7 @@ RequestInterpretation: TypeAlias = Annotated[
     NumericInterpretation | SoundInterpretation | CurtainsInterpretation
     | AlarmSetInterpretation | AlarmShiftInterpretation
     | DoNotDisturbInterpretation | InvalidValueInterpretation
-    | NoSlotsInterpretation,
+    | PastSettingsInterpretation | NoSlotsInterpretation,
     Field(discriminator="intent"),
 ]
 

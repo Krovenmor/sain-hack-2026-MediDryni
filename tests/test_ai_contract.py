@@ -26,9 +26,10 @@ EXAMPLES = {
     "invalid_value": {
         "subject": "temperature", "requested_value": 35, "reason": "out_of_range",
     },
+    "like_yesterday": {},
     **{intent: {} for intent in (
         "all_off", "alarm_cancel", "going_to_bed", "woke_up",
-        "like_yesterday", "like_home", "medical", "out_of_scope",
+        "like_home", "medical", "out_of_scope",
     )},
 }
 
@@ -85,6 +86,22 @@ class AiContractTests(unittest.TestCase):
             "mode": "absolute", "target_at": "2026-11-21T07:00:00+00:00",
         })
         self.assertEqual(result.slots.target_at, "2026-11-21T07:00:00+00:00")
+
+    def test_like_yesterday_supports_general_day_lookback(self):
+        implicit = parse("like_yesterday", {})
+        self.assertIsNone(implicit.slots.days_ago)
+        for days_ago in (0, 1, 7):
+            with self.subTest(days_ago=days_ago):
+                result = parse("like_yesterday", {"days_ago": days_ago})
+                self.assertEqual(result.intent, "like_yesterday")
+                self.assertEqual(result.slots.days_ago, days_ago)
+        for slots in (
+            {"days_ago": -1}, {"days_ago": 1.5},
+            {"days_ago": True}, {"days_ago": "3"},
+            {"days_ago": 1, "trip_offset": 2},
+        ):
+            with self.subTest(slots=slots), self.assertRaises(ValidationError):
+                parse("like_yesterday", slots)
 
     def test_alarm_qualifiers_are_preserved_without_inventing_defaults(self):
         implicit = parse("alarm_set", EXAMPLES["alarm_set"])
