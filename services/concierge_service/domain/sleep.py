@@ -23,6 +23,31 @@ class ResolvedPreferences:
     gentle_alarm: bool
 
 
+def night_settings(preferences: ResolvedPreferences) -> dict[str, dict[str, JSONScalar]]:
+    sound: dict[str, JSONScalar] = {"volume": 0}
+    if preferences.favorite_track_ids:
+        sound.update(track_id=preferences.favorite_track_ids[0], volume=20, timer_minutes=30)
+    return {
+        "light": {"brightness": 0},
+        "curtains": {"position": 0},
+        "climate": {"temperature_c": preferences.night_temperature},
+        "dnd": {"enabled": True},
+        "sound": sound,
+    }
+
+
+_OPEN_CURTAINS = 100
+
+
+def wake_settings() -> dict[str, dict[str, JSONScalar]]:
+    return {
+        "light": {"brightness": 100},
+        "curtains": {"position": _OPEN_CURTAINS},
+        "dnd": {"enabled": False},
+        "alarm": {"at": None},
+    }
+
+
 class SleepPlanner:
     def plan(
         self,
@@ -48,12 +73,13 @@ class SleepPlanner:
                 color_temperature_k=2700,
             )
 
-        add_step(night_start, "light", brightness=0)
-        if night_start < dawn:
-            add_step(night_start, "curtains", position=0)
-        add_step(dawn, "curtains", position=100)
-        add_step(night_start, "climate", temperature_c=preferences.night_temperature)
-        add_step(night_start, "dnd", enabled=True)
+        night = night_settings(preferences)
+        sound = night.pop("sound")
+        if night_start == dawn:
+            del night["curtains"]
+        for device, values in night.items():
+            add_step(night_start, device, **values)
+        add_step(dawn, "curtains", position=_OPEN_CURTAINS)
 
         add_step(
             check_in,
@@ -71,9 +97,7 @@ class SleepPlanner:
             add_step(
                 night_start,
                 "sound",
-                track_id=preferences.favorite_track_ids[0],
-                volume=20,
-                timer_minutes=max(1, int(remaining)),
+                **(sound | {"timer_minutes": max(1, int(remaining))}),
             )
             # The simulator stores the timer value without scheduling a volume change.
             add_step(sound_end, "sound", volume=0)
@@ -120,4 +144,4 @@ def _validate_steps(
         try:
             devices.validate(step.device_id, step.values)
         except DeviceValueError as exc:
-            raise SleepPlanError(f"scenario {exc}") from None
+            raise SleepPlanError(f"scenario {exc}") from exc

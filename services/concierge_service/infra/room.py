@@ -178,7 +178,9 @@ class RoomApiAdapter:
         except httpx.HTTPError:
             raise RoomApiError("simulator unavailable") from None
         if response.status_code != 200:
-            raise RoomApiError(f"simulator returned HTTP {response.status_code}")
+            raise RoomApiError(
+                f"simulator returned HTTP {response.status_code}", http_status=response.status_code
+            )
         try:
             return response_model.model_validate_json(response.content)
         except ValidationError:

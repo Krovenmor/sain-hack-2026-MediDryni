@@ -7,7 +7,8 @@ from concierge_service.domain.answers import ReplyAnswer
 from concierge_service.domain.dataset import Request
 
 RequestOutcome = ActionRejection | Literal[
-    "applied", "unchanged", "unrecognized", "room_error", "partial"
+    "applied", "unchanged", "unrecognized", "room_error", "partial",
+    "medical", "out_of_scope", "out_of_range", "unknown_track", "unsupported_mode", "invalid_time",
 ]
 
 _SUCCESS = {
@@ -19,6 +20,14 @@ _SUCCESS = {
     "curtains": "Изменил положение штор.",
     "do_not_disturb": "Изменил режим «Не беспокоить».",
     "all_off": "Выключил свет и звук.",
+    "sound_on": "Включил звук.",
+    "alarm_set": "Установил будильник.",
+    "alarm_shift": "Перенёс будильник.",
+    "alarm_cancel": "Отменил будильник.",
+    "going_to_bed": "Подготовил номер ко сну.",
+    "woke_up": "Настроил номер для утра.",
+    "like_home": "Применил сохранённые домашние настройки.",
+    "like_yesterday": "Применил сохранённые настройки за указанный день.",
 }
 _OUTCOME_TEXT = {
     "unchanged": "Нужная настройка уже установлена.",
@@ -28,6 +37,13 @@ _OUTCOME_TEXT = {
     "missing_state": "Не удалось определить текущее значение настройки.",
     "room_error": "Не удалось подтвердить изменение настроек номера.",
     "partial": "Часть изменений применил. Остальные изменения подтвердить не удалось.",
+    "missing_history": "В истории не нашёл нужные настройки. Уточните, что изменить.",
+    "medical": "Не могу ответить на медицинский вопрос.",
+    "out_of_scope": "Могу помочь с настройками номера в партнёрском отеле сна.",
+    "out_of_range": "Запрошенное значение выходит за допустимый диапазон.",
+    "unknown_track": "Такого трека нет в каталоге номера.",
+    "unsupported_mode": "Такой режим недоступен.",
+    "invalid_time": "Не удалось установить указанное время.",
 }
 
 
@@ -42,9 +58,5 @@ def compose_replies(
     response_class: Literal["done", "refused"] = (
         "done" if outcome in ("applied", "unchanged") else "refused"
     )
-    acknowledgment = "Готово." if response_class == "done" else "Не удалось выполнить просьбу полностью."
-    texts = (acknowledgment, text) if len(request.utterances) == 2 else (text,)
-    return tuple(
-        ReplyAnswer(at=utterance.at.isoformat(), text=reply_text, response_class=response_class)
-        for utterance, reply_text in zip(request.utterances, texts, strict=True)
-    )
+    at = max(request.at, *(utterance.at for utterance in request.utterances))
+    return (ReplyAnswer(at=at.isoformat(), text=text, response_class=response_class),)

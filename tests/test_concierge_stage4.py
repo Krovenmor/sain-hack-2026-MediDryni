@@ -4,7 +4,7 @@ import asyncio
 import json
 import unittest
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
@@ -13,7 +13,7 @@ import httpx
 
 from concierge_service.domain.action_planner import ActionPlanError, DevicePatch, plan_actions
 from concierge_service.domain.dataset import Request, Utterance
-from concierge_service.domain.sleep import SleepPlanner
+from concierge_service.domain.sleep import ResolvedPreferences, SleepPlanner
 from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
@@ -97,6 +97,7 @@ class RequestHandlerTests(unittest.IsolatedAsyncioTestCase):
     async def _handle(self, fields):
         return await self.handler.handle(
             self.request, self.context, fields, token="synthetic-token",
+            preferences=ResolvedPreferences(None, time(23), 19.5, False, (), False),
             deadline=asyncio.get_running_loop().time() + 5,
         )
 
@@ -110,11 +111,19 @@ class RequestHandlerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_partial_failure_reports_only_confirmed_progress(self) -> None:
         self.room.apply_action.side_effect = [
-            RoomSnapshot(SESSION_ID, self.request.at, {"light": {"brightness": 0}}),
-            RoomApiError("simulator unavailable"),
+            RoomSnapshot(SESSION_ID, self.request.at, {
+                "light": {"brightness": 0, "private_field": "private-snapshot-marker"}
+            }),
+            RoomApiError("private-error-marker", http_status=503),
         ]
-        with self.assertLogs("concierge_service.service.request_handler", level="WARNING"):
+        with self.assertLogs("concierge_service.service.request_handler", level="DEBUG") as logs:
             answer = await self._handle(catalog())
+        events = {event["event"]: event for event in (
+            json.loads(record.getMessage()) for record in logs.records
+        )}
+        self.assertEqual(events["action_snapshot"]["values"], {"brightness": 0})
+        self.assertEqual(events["request_action_failed"]["http_status"], 503)
+        self.assertNotIn("private-", "\n".join(logs.output))
         self.assertEqual(self.room.apply_action.await_count, 2)
         self.assertEqual(answer.replies[0].response_class, "refused")
         self.assertIn("Часть изменений применил", answer.replies[0].text)
@@ -219,7 +228,7 @@ class RequestRunTests(unittest.IsolatedAsyncioTestCase):
             record_id = context.request["record_id"]
             intent, slots = ("brighter", {"mode": "relative", "amount": None})
             if record_id == "request_other":
-                intent, slots = "like_home", {}
+                intent, slots = "out_of_scope", {}
             return REQUEST_INTERPRETATION_ADAPTER.validate_python({
                 "record_id": record_id, "intent": intent, "slots": slots,
             })
@@ -248,11 +257,11 @@ class RequestRunTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual([answer["record_id"] for answer in answers],
                                      ["request_0", "request_1", "request_other"])
                     self.assertEqual(
-                        [reply["response_class"] for reply in answers[1]["replies"]], ["done", "done"]
+                        [reply["response_class"] for reply in answers[1]["replies"]], ["done"]
                     )
                     self.assertEqual(
                         [reply["at"] for reply in answers[1]["replies"]],
-                        [utterance["at"] for utterance in later["utterances"]],
+                        [later["utterances"][-1]["at"]],
                     )
                     self.assertEqual(answers[2]["replies"][0]["response_class"], "refused")
 

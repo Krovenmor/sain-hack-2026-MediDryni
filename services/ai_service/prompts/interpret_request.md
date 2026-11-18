@@ -8,6 +8,8 @@ intent → slots:
   {mode:"relative",amount:положительное число или null без шага} или {mode:"absolute",value:число}.
   Яркость и громкость — процентные пункты, температура — °C. «Вдвое» вычисли от текущего значения.
 • sound_on (включить звук): {track_id,volume,timer_minutes}, неуказанные поля null, ID только из tracks.
+  Для «мой обычный» или общей просьбы включить звук без названия верни track_id:null.
+  Для названного трека, в том числе разговорного названия, сопоставь его с tracks.
 • curtains (шторы): {position:число}, 0 закрыты, 100 открыты.
 • alarm_set (поставить будильник): {target_at}; alarm_shift (сдвинуть):
   {mode:"relative",minutes:число со знаком, плюс позже} или {mode:"absolute",target_at}.

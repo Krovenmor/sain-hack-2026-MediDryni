@@ -56,6 +56,7 @@ class LlmAgent:
                     preference_messages(batch),
                     lambda text: parse_preference_batch(text, batch),
                     deadline=deadline, max_tokens=1800 * len(batch) + 1000,
+                    operation="preference_batch",
                     retry_invalid=False,
                 )
             except AiAgentError as error:
@@ -78,7 +79,9 @@ class LlmAgent:
         try:
             return await self._completions.run(
                 preference_messages([item]), item.parse,
-                deadline=deadline, max_tokens=3000, retry_invalid=retry_invalid,
+                deadline=deadline, max_tokens=4000, retry_invalid=retry_invalid,
+                length_retry_max_tokens=6000,
+                operation="preference_single",
             )
         except AiAgentError as error:
             return PreferenceFailure(user_id=item.user_id, error=error.code)
@@ -90,6 +93,7 @@ class LlmAgent:
         return await self._completions.run(
             request_messages(item), lambda text: validate_interpretation(text, item),
             deadline=deadline, max_tokens=1500,
+            operation="interpret_request",
         )
 
 
@@ -105,10 +109,10 @@ def _preference_batches(
     clock = asyncio.get_running_loop().time
     batch: list[PreferenceInput] = []
     batch_chars = 0
-    for item in items:
+    for profile_number, item in enumerate(items, 1):
         user_id = cast(str, item.user["user_id"])
         expired = clock() >= deadline
-        data = PreferenceInput(item, user_id, include_history=not expired)
+        data = PreferenceInput(item, user_id, profile_number=profile_number, include_history=not expired)
         size = len(compact_json(data.payload())) if not expired else 0
         if batch and (len(batch) >= batch_size or batch_chars + size > 32000):
             yield batch

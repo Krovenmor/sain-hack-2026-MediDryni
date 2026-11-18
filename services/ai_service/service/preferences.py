@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from math import isfinite
 from collections import Counter
@@ -9,13 +10,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import JsonValue, ValidationError
 
 from concierge_service.ports.ai import (
-    AiAgentError,
     JsonObject,
     PreferenceHints,
     ProfileContext,
     SourceRef,
 )
 
+from ai_service.errors import InvalidModelOutput, validation_reason
 from ai_service.prompts import load_prompt
 from ai_service.service.context import (
     bounded_history,
@@ -24,11 +25,13 @@ from ai_service.service.context import (
     preference_evidence,
     track_catalog,
 )
+from run_telemetry import log_event
 
 
 _INSTRUCTIONS = load_prompt("preferences.md")
 _SINGLE_FORMAT = load_prompt("preferences_single.md")
 _BATCH_FORMAT = load_prompt("preferences_batch.md")
+logger = logging.getLogger(__name__)
 
 _PROFILE_FIELDS = (
     "user_id", "timezone", "chronotype", "weekday_bedtime", "weekday_wake_time",
@@ -37,9 +40,12 @@ _PROFILE_FIELDS = (
 
 
 class PreferenceInput:
-    def __init__(self, item: ProfileContext, user_id: str, *, include_history: bool = True) -> None:
+    def __init__(
+        self, item: ProfileContext, user_id: str, *, profile_number: int, include_history: bool = True
+    ) -> None:
         self._item = item
         self._user_id = user_id
+        self._profile_number = profile_number
         self._profile = {key: item.user[key] for key in _PROFILE_FIELDS if key in item.user}
         self._events = bounded_history(
             [event for event in item.events if event["user_id"] == user_id
@@ -72,17 +78,28 @@ class PreferenceInput:
             "tracks": track_catalog(self._item.tracks),
         }
 
+    def log_selected_sources(self) -> None:
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger, "llm_preference_context", level=logging.DEBUG,
+                profile_number=self._profile_number, profile_fields=sorted(self._profile),
+                event_ids=[row["event_id"] for row in self._events],
+                message_ids=[row["message_id"] for row in self._messages],
+                events_available=len(self._item.events),
+                messages_available=len(self._item.chat_history),
+            )
+
     def parse(self, text: str) -> PreferenceHints:
         try:
             hints = PreferenceHints.model_validate_json(text)
-        except ValidationError:
-            raise AiAgentError("invalid_response") from None
+        except ValidationError as error:
+            raise InvalidModelOutput(validation_reason(error, "preference_schema")) from None
         self.validate(hints)
         return hints
 
     def validate(self, hints: PreferenceHints) -> None:
         if hints.user_id != self._user_id:
-            raise AiAgentError("invalid_response")
+            raise InvalidModelOutput("preference_user_id")
 
         records = {
             ("profile", self._user_id): self._profile,
@@ -102,13 +119,13 @@ class PreferenceInput:
             ids = hints.favorite_track_ids.value
             catalog_ids = {track["track_id"] for track in self._item.tracks}
             if len(set(ids)) != len(ids) or not set(ids) <= catalog_ids:
-                raise AiAgentError("invalid_response")
+                raise InvalidModelOutput("preference_track_catalog")
 
         if hints.home_timezone is not None:
             try:
                 ZoneInfo(hints.home_timezone.value)
             except (ValueError, ZoneInfoNotFoundError):
-                raise AiAgentError("invalid_response") from None
+                raise InvalidModelOutput("preference_timezone") from None
 
         fields = {
             (device["device_id"], field["field_id"])
@@ -117,19 +134,19 @@ class PreferenceInput:
         }
         for setting in hints.settings:
             if (setting.device_id, setting.field_id) not in fields:
-                raise AiAgentError("invalid_response")
+                raise InvalidModelOutput("preference_device_field")
             if isinstance(setting.value, float) and not isfinite(setting.value):
-                raise AiAgentError("invalid_response")
+                raise InvalidModelOutput("preference_nonfinite_value")
 
 
 def _validate_source(record: JsonObject | None, source: SourceRef) -> None:
     if record is None:
-        raise AiAgentError("invalid_response")
+        raise InvalidModelOutput("preference_source_id")
     pointer = source.pointer
     if pointer == "":
         return
     if not pointer.startswith("/") or re.search(r"~(?![01])", pointer):
-        raise AiAgentError("invalid_response")
+        raise InvalidModelOutput("preference_source_pointer")
 
     value: JsonValue = record
     for segment in pointer[1:].split("/"):
@@ -144,10 +161,12 @@ def _validate_source(record: JsonObject | None, source: SourceRef) -> None:
         ):
             value = value[int(key)]
         else:
-            raise AiAgentError("invalid_response")
+            raise InvalidModelOutput("preference_source_pointer")
 
 
 def preference_messages(items: Sequence[PreferenceInput]) -> list[dict[str, str]]:
+    for item in items:
+        item.log_selected_sources()
     if len(items) == 1:
         prompt = f"{_INSTRUCTIONS}\n{_SINGLE_FORMAT}"
         payload = items[0].payload()
@@ -163,9 +182,9 @@ def parse_preference_batch(
     try:
         payload = json.loads(text)
     except (ValueError, RecursionError):
-        raise AiAgentError("invalid_response") from None
+        raise InvalidModelOutput("model_json") from None
     if not isinstance(payload, list):
-        raise AiAgentError("invalid_response")
+        raise InvalidModelOutput("preference_batch_schema")
 
     inputs = {item.user_id: item for item in items}
     ids = Counter(
@@ -173,16 +192,24 @@ def parse_preference_batch(
         if isinstance(row, dict) and isinstance(row.get("user_id"), str)
     )
     results = {}
+    rejected: Counter[str] = Counter()
     for row in payload:
         if not isinstance(row, dict) or not isinstance(row.get("user_id"), str):
+            rejected["preference_schema"] += 1
             continue
         user_id = row["user_id"]
         if user_id not in inputs or ids[user_id] != 1:
+            rejected["preference_user_id"] += 1
             continue
         try:
             results[user_id] = inputs[user_id].parse(compact_json(row))
-        except AiAgentError:
-            continue
+        except InvalidModelOutput as error:
+            rejected[error.reason] += 1
+    if len(results) != len(items) or rejected:
+        log_event(
+            logger, "llm_preference_batch_incomplete", accepted=len(results), expected=len(items),
+            rejected=dict(rejected),
+        )
     if not results:
-        raise AiAgentError("invalid_response")
+        raise InvalidModelOutput("preference_batch_no_valid_profiles")
     return results

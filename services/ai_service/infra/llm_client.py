@@ -21,10 +21,16 @@ class LlmClientError(AiAgentError):
     def __init__(
         self, code: AiErrorCode, *, retry_after_s: float | None = None,
         http_status: int | None = None,
+        reason: str | None = None,
+        finish_reason: str | None = None,
+        total_tokens: int | None = None,
     ) -> None:
         super().__init__(code)
         self.retry_after_s = retry_after_s
         self.http_status = http_status
+        self.reason = reason
+        self.finish_reason = finish_reason
+        self.total_tokens = total_tokens
 
 
 class LlmClient:
@@ -87,17 +93,38 @@ class LlmClient:
 def _parse_completion(response: httpx.Response) -> LlmCompletion:
     try:
         payload = response.json()
+    except (ValueError, RecursionError):
+        raise LlmClientError(
+            "invalid_response", reason="proxy_json", http_status=response.status_code
+        ) from None
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    usage = usage if isinstance(usage, dict) else None
+    tokens = (usage or {}).get("total_tokens")
+    diagnostics = {
+        "http_status": response.status_code,
+        "total_tokens": tokens if type(tokens) is int and tokens >= 0 else None,
+    }
+    try:
         choice = payload["choices"][0]
-        if choice["finish_reason"] != "stop":
-            raise LlmClientError("invalid_response")
-        content = choice["message"]["content"]
-    except (ValueError, KeyError, IndexError, TypeError):
-        raise LlmClientError("invalid_response") from None
+    except (KeyError, IndexError, TypeError):
+        raise LlmClientError("invalid_response", reason="proxy_choices", **diagnostics) from None
+    if not isinstance(choice, dict):
+        raise LlmClientError("invalid_response", reason="proxy_choices", **diagnostics)
 
+    finish_reason = choice.get("finish_reason")
+    if finish_reason != "stop":
+        known_reasons = ("length", "content_filter", "tool_calls", "function_call")
+        safe_reason = finish_reason if finish_reason in known_reasons else "unknown"
+        raise LlmClientError(
+            "invalid_response", reason="proxy_finish_reason", finish_reason=safe_reason, **diagnostics
+        )
+    message = choice.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
     if not isinstance(content, str) or not content.strip():
-        raise LlmClientError("invalid_response")
-    usage = payload.get("usage")
-    return LlmCompletion(text=content, usage=usage if isinstance(usage, dict) else None)
+        raise LlmClientError(
+            "invalid_response", reason="proxy_empty_content", finish_reason="stop", **diagnostics
+        )
+    return LlmCompletion(text=content, usage=usage)
 
 
 def _retry_after_seconds(header: str | None) -> float | None:

@@ -283,4 +283,7 @@ class ScenarioRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             all(item.headers["Authorization"] == "Bearer synthetic-token" for item in requests)
         )
-        self.assertEqual(logs.records[0].getMessage(), "Stay scenario skipped: simulator returned HTTP 400")
+        event = json.loads(logs.records[0].getMessage())
+        self.assertEqual(event["event"], "stay_skipped")
+        self.assertEqual(event["record_id"], "stay_1")
+        self.assertEqual(event["http_status"], 400)

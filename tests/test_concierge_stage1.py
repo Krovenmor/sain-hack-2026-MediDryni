@@ -1,6 +1,7 @@
 """Stage 1 tests with the real adapter and a synthetic Case2Dataset."""
 
 import copy
+import json
 import unittest
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -217,8 +218,15 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
     async def test_run_fetches_dataset_once_with_same_token_and_no_sensitive_logs(self) -> None:
         health = await self.client.get("/health")
 
-        with self.assertNoLogs(level="INFO"):
+        with self.assertLogs(level="INFO") as logs:
             response = await self._run(dataset_code="case2-test-v1")
+
+        for marker in ("case2-test-v1", "run-token", "Сделай свет ярче", "initial_state"):
+            self.assertNotIn(marker, "\n".join(logs.output))
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(len({event["run_id"] for event in events}), 1)
+        self.assertEqual(events[0]["event"], "run_started")
+        self.assertEqual(events[-1]["event"], "run_finished")
 
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.json(), {"status": "ok"})
@@ -228,9 +236,9 @@ class Stage1Tests(unittest.IsolatedAsyncioTestCase):
         ])
         request_answer, = response.json()["requests"]
         self.assertEqual(request_answer["record_id"], "request_1")
-        self.assertEqual([reply["response_class"] for reply in request_answer["replies"]], [
-            "refused", "refused",
-        ])
+        self.assertEqual(
+            [reply["response_class"] for reply in request_answer["replies"]], ["refused"]
+        )
         request, = self.get_data_requests
         self.assertEqual(request.method, "GET")
         self.assertEqual(request.url.path, "/case/2/getData")

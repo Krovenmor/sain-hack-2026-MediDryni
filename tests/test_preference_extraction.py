@@ -84,7 +84,14 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([message["message_id"] for message in guest_input["chat_history"]], ["chat"])
             return completion(payload)
 
-        result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
+        with self.assertLogs("ai_service.service.preferences", level="DEBUG") as logs:
+            result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
+        event, = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(event["event_ids"], ["note"])
+        self.assertEqual(event["message_ids"], ["chat"])
+        self.assertEqual(event["profile_number"], 1)
+        self.assertNotIn("Люблю", "\n".join(logs.output))
+        self.assertNotIn("Private", "\n".join(logs.output))
         self.assertEqual(result, [PreferenceHints.model_validate(payload)])
 
     async def test_invalid_sources_and_catalog_references_fail(self):
@@ -170,11 +177,54 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
             for user_id in ("first", "second")
         ])
 
-    async def test_retries_only_invalid_member_of_preference_batch(self):
-        calls = []
+    async def test_length_retries_single_profile_once_with_more_tokens_and_same_messages(self):
+        requests = []
 
         def handle(request):
-            payload = json.loads(json.loads(request.content)["messages"][1]["content"])
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={
+                "choices": [{"finish_reason": "length", "message": {"content": "truncated"}}],
+            })
+
+        with self.assertLogs("ai_service.service.limits", level="INFO") as logs:
+            result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
+
+        self.assertEqual(result, [PreferenceFailure(user_id="guest", error="invalid_response")])
+        self.assertEqual([body["max_tokens"] for body in requests], [4000, 6000])
+        self.assertEqual(requests[0]["messages"], requests[1]["messages"])
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual([event["max_tokens"] for event in events], [4000, 6000])
+
+    async def test_schema_error_retries_single_profile_with_original_limit_and_correction(self):
+        requests = []
+
+        def handle(request):
+            requests.append(json.loads(request.content))
+            return completion(
+                {"user_id": "guest", "private-field": "private-value"} if len(requests) == 1 else hints()
+            )
+
+        with self.assertLogs("ai_service.errors", level="DEBUG") as logs:
+            result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
+
+        self.assertEqual(result, [PreferenceHints.model_validate(hints())])
+        issue, = [entry for entry in json.loads(logs.records[0].getMessage())["issues"]
+                  if entry["type"] == "extra_forbidden"]
+        self.assertEqual(issue["path"], ["<variant>"])
+        self.assertNotIn("private-", "\n".join(logs.output))
+        self.assertEqual([body["max_tokens"] for body in requests], [4000, 4000])
+        first, second = [body["messages"] for body in requests]
+        self.assertEqual(first[1:], second[1:])
+        self.assertIn("Предыдущий результат не прошёл проверку", second[0]["content"])
+
+    async def test_retries_only_invalid_member_of_preference_batch(self):
+        calls = []
+        budgets = []
+
+        def handle(request):
+            body = json.loads(request.content)
+            budgets.append(body["max_tokens"])
+            payload = json.loads(body["messages"][1]["content"])
             if isinstance(payload, list):
                 calls.append([entry["user"]["user_id"] for entry in payload])
                 return completion([hints("second"), {"user_id": "first"}])
@@ -182,10 +232,15 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
             return completion({"user_id": "first"})
 
         agent = self.make_agent(handle, batch_size=3)
-        results = await agent.extract_preference_hints(
-            [profile("first"), profile("second")], timeout_s=1
-        )
+        with self.assertLogs("ai_service", level="INFO") as logs:
+            results = await agent.extract_preference_hints(
+                [profile("first"), profile("second")], timeout_s=1
+            )
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(events[0]["rejected"], {"preference_schema": 1})
+        self.assertEqual(events[-1]["reason"], "preference_schema")
         self.assertEqual(calls, [["first", "second"], "first"])
+        self.assertEqual(budgets, [4600, 4000])
         self.assertEqual(results, [
             PreferenceFailure(user_id="first", error="invalid_response"),
             PreferenceHints.model_validate(hints("second")),

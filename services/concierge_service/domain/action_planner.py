@@ -12,7 +12,7 @@ from concierge_service.domain.device_catalog import (
     RoomState,
 )
 
-ActionRejection = Literal["unsupported", "invalid_value", "missing_state"]
+ActionRejection = Literal["unsupported", "invalid_value", "missing_state", "missing_history"]
 
 _RELATIVE_SETTINGS = {
     "brighter": ("light", "brightness", 15),
@@ -66,11 +66,20 @@ def plan_actions(
         else:
             raise ActionPlanError("unsupported")
 
+    except DeviceValueError as exc:
+        raise ActionPlanError("invalid_value") from exc
+
+    return validate_patches(patches, state, devices)
+
+
+def validate_patches(
+    patches: tuple[DevicePatch, ...], state: RoomState, devices: DeviceCatalog
+) -> tuple[DevicePatch, ...]:
+    try:
         for patch in patches:
             devices.validate(patch.device_id, patch.values)
-    except DeviceValueError:
-        raise ActionPlanError("invalid_value") from None
-
+    except DeviceValueError as exc:
+        raise ActionPlanError("invalid_value") from exc
     return tuple(patch for patch in patches if not patch_matches_state(patch, state))
 
 

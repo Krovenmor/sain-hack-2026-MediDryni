@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import date, datetime, timedelta
 from math import isfinite
@@ -15,6 +16,7 @@ from concierge_service.ports.ai import (
     RequestInterpretation,
 )
 
+from ai_service.errors import InvalidModelOutput, validation_reason
 from ai_service.prompts import load_prompt
 from ai_service.service.context import (
     bounded_history,
@@ -24,9 +26,11 @@ from ai_service.service.context import (
     record_text,
     track_catalog,
 )
+from run_telemetry import log_event
 
 
 _SYSTEM_PROMPT = load_prompt("interpret_request.md")
+logger = logging.getLogger(__name__)
 
 _PAST = re.compile(r"вчера|\bд(?:ень|ня|ней) назад\b|как (?:тогда|в тот раз)|как .*заезд|прошл\w* заезд")
 _HOME = re.compile(r"как дома|по-домашнему|как у меня дома")
@@ -40,15 +44,26 @@ _ALARM_REFERENCE = re.compile(r"будиль|разбуд|позже|раньш�
 def request_messages(item: RequestContext) -> list[dict[str, str]]:
     utterances = cast(list[JsonObject], item.request["utterances"])
     query = " ".join(record_text(record) for record in utterances).casefold()
+    relevant = _reference_context(item, query)
     payload = {
         "request": item.request,
         "hotel_timezone": item.stay["hotel_timezone"],
         "devices": device_catalog(item.profile.devices, include_limits=True),
         "tracks": track_catalog(item.profile.tracks),
-        **_reference_context(item, query),
+        **relevant,
     }
     if _ALARM_REFERENCE.search(query) and item.stay.get("target_wake_at") is not None:
         payload["target_wake_at"] = item.stay["target_wake_at"]
+    if logger.isEnabledFor(logging.DEBUG):
+        selected = {key: cast(list[JsonObject], value) for key, value in relevant.items()}
+        log_event(
+            logger, "llm_request_context", level=logging.DEBUG,
+            utterances=len(utterances), conversation_turns=len(selected.get("conversation", ())),
+            event_ids=[row["event_id"] for row in selected.get("events", ())],
+            message_ids=[row["message_id"] for row in selected.get("chat_history", ())],
+            observed_settings=len(selected.get("observed_settings", ())),
+            includes_target_wake="target_wake_at" in payload,
+        )
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {
@@ -138,7 +153,7 @@ def _mentions_day(entry: JsonObject, day: date, zone: object) -> bool:
 def validate_interpretation(text: str, item: RequestContext) -> RequestInterpretation:
     try:
         result = REQUEST_INTERPRETATION_ADAPTER.validate_json(text)
-    except ValidationError:
+    except ValidationError as invalid:
         try:
             error = json.loads(text)
         except (ValueError, RecursionError):
@@ -147,15 +162,15 @@ def validate_interpretation(text: str, item: RequestContext) -> RequestInterpret
             "record_id": item.request["record_id"], "error": "unresolved_reference"
         }:
             raise AiAgentError("unresolved_reference") from None
-        raise AiAgentError("invalid_response") from None
+        raise InvalidModelOutput(validation_reason(invalid, "interpretation_schema")) from None
 
     if result.record_id != item.request["record_id"]:
-        raise AiAgentError("invalid_response")
+        raise InvalidModelOutput("interpretation_record_id")
     if result.intent == "sound_on" and result.slots.track_id is not None:
         if not any(track["track_id"] == result.slots.track_id for track in item.profile.tracks):
-            raise AiAgentError("invalid_response")
+            raise InvalidModelOutput("interpretation_track_catalog")
     if result.intent == "invalid_value":
         value = result.slots.requested_value
         if isinstance(value, float) and not isfinite(value):
-            raise AiAgentError("invalid_response")
+            raise InvalidModelOutput("interpretation_nonfinite_value")
     return result

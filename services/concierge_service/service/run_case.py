@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from datetime import UTC
+from time import monotonic
+from uuid import uuid4
 
 from concierge_service.domain.answers import RequestAnswer, RunResult, StayAnswer
 from concierge_service.domain.dataset import DatasetIndex, build_dataset_index
-from concierge_service.domain.sleep import SleepPlanError, SleepPlanner
+from concierge_service.domain.device_catalog import DeviceValueError
+from concierge_service.domain.sleep import ResolvedPreferences, SleepPlanError, SleepPlanner
 from concierge_service.ports.ai import (
     AiAgent,
     AiAgentError,
@@ -21,8 +25,10 @@ from concierge_service.ports.dataset import DatasetSource
 from concierge_service.ports.hack_api import HackApi
 from concierge_service.ports.room import RoomApi, RoomApiError
 from concierge_service.ports.store import ConversationStore
+from concierge_service.service.diagnostics import catalog_failure, preference_details, setting_values
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.request_handler import RequestHandler
+from run_telemetry import log_context, log_event
 
 logger = logging.getLogger(__name__)
 _RUN_BUDGET_S = 45 * 60
@@ -42,7 +48,7 @@ class RunCase:
         sleep_planner: SleepPlanner,
         ai_agent: AiAgent,
         conversation_store_factory: Callable[[], ConversationStore],
-        preference_timeout_s: float = 60.0,
+        preference_timeout_s: float = 240.0,
     ) -> None:
         self._hack_api = hack_api
         self._room_api = room_api
@@ -57,22 +63,76 @@ class RunCase:
     ) -> RunResult:
         if case != 2:
             raise UnsupportedCase
+        with log_context(run_id=uuid4().hex):
+            started = monotonic()
+            log_event(logger, "run_started")
+            try:
+                result = await self._run(dataset_code=dataset_code, token=token)
+            except Exception as exc:
+                log_event(
+                    logger, "run_failed", level=logging.WARNING, error_type=type(exc).__name__,
+                    duration_ms=round((monotonic() - started) * 1000),
+                )
+                raise
+            log_event(
+                logger, "run_finished", stays=len(result.stays), requests=len(result.requests),
+                duration_ms=round((monotonic() - started) * 1000),
+            )
+            return result
+
+    async def _run(self, *, dataset_code: str | None, token: str) -> RunResult:
         deadline = asyncio.get_running_loop().time() + _RUN_BUDGET_S
         parsed = await self._hack_api.get_case2_data(
             dataset_code=dataset_code, token=token
         )
         index = build_dataset_index(parsed.dataset)
+        log_event(
+            logger, "dataset_loaded", users=len(index.users_by_id), stays=len(index.stays_by_id),
+            requests=len(index.requests_by_id),
+        )
         profiles = _build_profiles(index, parsed.source)
+        preference_started = monotonic()
         hints_by_user = await self._extract_preferences(profiles, deadline=deadline)
+        log_event(
+            logger, "preferences_finished", profiles=len(profiles), succeeded=len(hints_by_user),
+            duration_ms=round((monotonic() - preference_started) * 1000),
+        )
         preferences_by_user = {
             user_id: resolve_preferences(user, index.tracks_by_id, hints_by_user.get(user_id))
             for user_id, user in index.users_by_id.items()
         }
+        if logger.isEnabledFor(logging.DEBUG):
+            for profile_number, resolved in enumerate(preferences_by_user.values(), 1):
+                log_event(
+                    logger, "preference_resolved", level=logging.DEBUG, profile_number=profile_number,
+                    bedtime=resolved.bedtime.isoformat(), has_home_timezone=resolved.home_timezone is not None,
+                    night_temperature=resolved.night_temperature, light_sensitive=resolved.light_sensitive,
+                    gentle_alarm=resolved.gentle_alarm, favorite_track_ids=[
+                        track for track in resolved.favorite_track_ids
+                        if "track_id" in setting_values({"track_id": track})
+                    ],
+                )
         answers: list[StayAnswer] = []
+        profile_numbers = {user_id: number for number, user_id in enumerate(profiles, 1)}
         for stay in parsed.dataset.stays:
             try:
                 preferences = preferences_by_user[stay.user_id]
                 steps = self._sleep_planner.plan(stay, preferences, index.device_fields_by_device)
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger, "stay_scenario", level=logging.DEBUG, record_id=stay.record_id,
+                        profile_number=profile_numbers[stay.user_id],
+                        steps=[
+                            {
+                                "seconds_from_check_in": (
+                                    step.at.astimezone(UTC) - stay.check_in_at.astimezone(UTC)
+                                ).total_seconds(),
+                                "device": step.device_id, "fields": sorted(step.values),
+                                "values": setting_values(step.values),
+                            }
+                            for step in steps
+                        ],
+                    )
                 session = await self._room_api.create_session(
                     record_id=stay.record_id, kind="stay", token=token
                 )
@@ -80,11 +140,23 @@ class RunCase:
                     session_id=session.session_id, steps=steps, token=token
                 )
             except (SleepPlanError, RoomApiError) as exc:
-                logger.warning("Stay scenario skipped: %s", exc)
+                reason = "invalid_scenario" if isinstance(exc, SleepPlanError) else "simulator_error"
+                log_event(
+                    logger, "stay_skipped", level=logging.WARNING,
+                    record_id=stay.record_id, reason=reason,
+                    http_status=exc.http_status if isinstance(exc, RoomApiError) else None,
+                )
+                if isinstance(exc.__cause__, DeviceValueError):
+                    log_event(
+                        logger, "stay_catalog_rejected", level=logging.DEBUG, record_id=stay.record_id,
+                        **catalog_failure(exc.__cause__),
+                    )
                 continue
             answers.append(StayAnswer(stay.record_id, str(session.session_id)))
+            log_event(logger, "stay_finished", record_id=stay.record_id, steps=len(steps))
         request_answers = await self._process_requests(
-            index, parsed.source, profiles, hints_by_user, token=token, deadline=deadline
+            index, parsed.source, profiles, hints_by_user, preferences_by_user,
+            token=token, deadline=deadline,
         )
         return RunResult(stays=tuple(answers), requests=request_answers)
 
@@ -103,16 +175,32 @@ class RunCase:
                     tuple(profiles.values()), timeout_s=budget
                 )
         except AiAgentError as exc:
-            logger.warning("Preference extraction failed: %s", exc.code)
+            log_event(logger, "preferences_failed", level=logging.WARNING, reason=exc.code)
             return {}
         except TimeoutError:
-            logger.warning("Preference extraction timed out")
+            log_event(logger, "preferences_failed", level=logging.WARNING, reason="timeout")
             return {}
 
         if tuple(result.user_id for result in results) != tuple(profiles):
-            logger.warning("Preference extraction returned mismatched user IDs")
+            log_event(
+                logger, "preferences_failed", level=logging.WARNING, reason="mismatched_user_ids"
+            )
             return {}
-        return {result.user_id: result for result in results if isinstance(result, PreferenceHints)}
+        hints = {}
+        for profile_number, result in enumerate(results, 1):
+            if isinstance(result, PreferenceHints):
+                hints[result.user_id] = result
+                log_event(logger, "preference_profile", profile_number=profile_number,
+                          status="ok", observations=len(result.settings))
+                if logger.isEnabledFor(logging.DEBUG):
+                    log_event(
+                        logger, "preference_hints", level=logging.DEBUG, profile_number=profile_number,
+                        **preference_details(result),
+                    )
+            else:
+                log_event(logger, "preference_profile", profile_number=profile_number,
+                          status=result.error)
+        return hints
 
     async def _process_requests(
         self,
@@ -120,13 +208,14 @@ class RunCase:
         source: DatasetSource,
         profiles: dict[str, ProfileContext],
         hints: dict[str, PreferenceHints],
+        preferences: dict[str, ResolvedPreferences],
         *,
         token: str,
         deadline: float,
     ) -> tuple[RequestAnswer, ...]:
         store = self._conversation_store_factory()
         answers: list[RequestAnswer] = []
-        for user_id, requests in index.requests_by_user.items():
+        for profile_number, (user_id, requests) in enumerate(index.requests_by_user.items(), 1):
             for request in requests:
                 context = RequestContext(
                     profile=profiles[user_id],
@@ -136,9 +225,11 @@ class RunCase:
                     conversation=store.history(user_id),
                     preference_hints=hints.get(user_id),
                 )
-                answer = await self._request_handler.handle(
-                    request, context, index.device_fields_by_device, token=token, deadline=deadline
-                )
+                with log_context(record_id=request.record_id, profile_number=profile_number):
+                    answer = await self._request_handler.handle(
+                        request, context, index.device_fields_by_device,
+                        preferences=preferences[user_id], token=token, deadline=deadline,
+                    )
                 if answer is None:
                     continue
                 answers.append(answer)

@@ -79,6 +79,7 @@ class AiContractTests(unittest.TestCase):
         for target in (
             "2026-11-21T07:00:00Z", "2026-11-21T07:00:00",
             "2026-02-30T07:00:00+03:00",
+            "2026-11-21T07:00:00+00:60",
         ):
             with self.subTest(target=target), self.assertRaises(ValidationError):
                 parse("alarm_set", {"target_at": target})

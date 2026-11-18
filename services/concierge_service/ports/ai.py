@@ -30,7 +30,7 @@ def _valid_timestamp(value: str) -> str:
 # Keep explicit offsets on the wire, as required by the external contract.
 OffsetTimestamp: TypeAlias = Annotated[
     str,
-    Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{2}:\d{2}$"),
+    Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-](?:[01]\d|2[0-3]):[0-5]\d$"),
     AfterValidator(_valid_timestamp),
 ]
 FiniteNumber: TypeAlias = Annotated[float, Field(allow_inf_nan=False)]
@@ -67,10 +67,13 @@ class Hint(DTO, Generic[T]):
     sources: Annotated[list[SourceRef], Field(min_length=1)]
 
 
+SettingContext: TypeAlias = Literal["home", "past_stay", "bedtime", "wake_up"]
+
+
 class ObservedSetting(DTO):
     """A setting found in history, never an instruction to change a device."""
 
-    context: Literal["home", "past_stay"]
+    context: SettingContext
     observed_at: OffsetTimestamp | None
     device_id: Identifier
     field_id: Identifier

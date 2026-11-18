@@ -159,16 +159,51 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
             calls.append(data)
             if len(calls) == 1:
                 return completion("invalid")
-            return completion(json.dumps({
+            response = completion(json.dumps({
                 "record_id": "request_1", "intent": "alarm_shift",
                 "slots": {"mode": "relative", "minutes": 30},
             }))
+            return httpx.Response(200, json=response.json() | {"usage": {"total_tokens": 77}})
 
-        result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
+        with self.assertLogs("ai_service.service.limits", level="INFO") as logs:
+            result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual([item["operation"] for item in events], ["interpret_request"] * 2)
+        self.assertEqual([item["outcome"] for item in events], ["invalid_response", "ok"])
+        self.assertEqual([item["reason"] for item in events], ["model_json", None])
+        self.assertEqual([item["total_tokens"] for item in events], [None, 77])
+        self.assertNotIn("Передвинь его", "\n".join(logs.output))
         self.assertEqual(result.slots.minutes, 30)
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0]["conversation"], [entry.model_dump() for entry in item.conversation])
         self.assertEqual(calls[0]["request"]["initial_state"], item.request["initial_state"])
+
+    async def test_rejected_proxy_completion_counts_tokens_without_logging_content(self):
+        responses = iter([
+            httpx.Response(200, json={
+                "choices": [{
+                    "finish_reason": "length", "message": {"content": "private-content"},
+                }],
+                "usage": {"total_tokens": 123},
+            }),
+            httpx.Response(200, json={
+                "choices": [{"finish_reason": "private-reason"}],
+                "usage": {"total_tokens": 12},
+            }),
+        ])
+        agent = self.make_agent(lambda _: next(responses))
+
+        with self.assertLogs("ai_service.service.limits", level="INFO") as logs:
+            with self.assertRaisesRegex(AiAgentError, "^invalid_response$"):
+                await agent.interpret_request(request_context("Ярче"), timeout_s=1)
+
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual([event["reason"] for event in events], ["proxy_finish_reason"] * 2)
+        self.assertEqual([event["finish_reason"] for event in events], ["length", "unknown"])
+        self.assertEqual([event["total_tokens"] for event in events], [123, 12])
+        self.assertEqual(agent.usage()["total_tokens"], 135)
+        self.assertEqual(agent.usage()["responses_with_usage"], 2)
+        self.assertNotIn("private-", "\n".join(logs.output))
 
     async def test_unresolved_reference_is_not_retried(self):
         agent = self.make_agent(lambda request: completion(json.dumps({
