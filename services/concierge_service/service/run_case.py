@@ -26,6 +26,7 @@ from concierge_service.service.request_handler import RequestHandler
 
 logger = logging.getLogger(__name__)
 _RUN_BUDGET_S = 45 * 60
+_PREFERENCE_RETURN_GRACE_S = 0.25
 
 
 class UnsupportedCase(Exception):
@@ -90,12 +91,14 @@ class RunCase:
     async def _extract_preferences(
         self, profiles: dict[str, ProfileContext], *, deadline: float
     ) -> dict[str, PreferenceHints]:
-        budget = min(self._preference_timeout_s, deadline - asyncio.get_running_loop().time())
+        now = asyncio.get_running_loop().time()
+        # The agent needs time to return completed hints after its own timeout.
+        budget = min(self._preference_timeout_s, deadline - now - _PREFERENCE_RETURN_GRACE_S)
         if budget <= 0:
             return {}
 
         try:
-            async with asyncio.timeout(budget):
+            async with asyncio.timeout_at(min(deadline, now + budget + _PREFERENCE_RETURN_GRACE_S)):
                 results = await self._ai_agent.extract_preference_hints(
                     tuple(profiles.values()), timeout_s=budget
                 )
