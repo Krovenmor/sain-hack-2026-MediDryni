@@ -14,6 +14,7 @@ from concierge_service.infra.dataset_schemas import (
     SleepPreferencesPayload,
     UserPayload,
 )
+from concierge_service.infra.http_retry import request_with_retry
 from concierge_service.ports.dataset import DatasetSource, ParsedDataset
 from concierge_service.ports.hack_api import HackApiError
 
@@ -28,7 +29,8 @@ class HackApiAdapter:
     ) -> ParsedDataset:
         params = None if dataset_code is None else {"dataset_code": dataset_code}
         try:
-            response = await self._client.get(
+            response = await request_with_retry(
+                self._client, "GET",
                 f"{self._base_url}/case/2/getData",
                 params=params,
                 headers={"Authorization": f"Bearer {token}"},

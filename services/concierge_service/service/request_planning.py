@@ -62,7 +62,7 @@ def plan_request(
         changes = {"alarm": {"at": None}}
     elif isinstance(interpreted, SoundInterpretation):
         try:
-            sound = _sound_values(request, interpreted, preferences, devices)
+            sound = _sound_values(request, interpreted, context, preferences, devices)
         except DeviceValueError as exc:
             raise ActionPlanError("invalid_value") from exc
         changes = {"sound": sound}
@@ -147,6 +147,7 @@ def _alarm_values(
 def _sound_values(
     request: Request,
     interpreted: SoundInterpretation,
+    context: RequestContext,
     preferences: ResolvedPreferences,
     catalog: DeviceCatalog,
 ) -> dict[str, JSONScalar]:
@@ -157,7 +158,14 @@ def _sound_values(
         if preferences.favorite_track_ids:
             track = preferences.favorite_track_ids[0]
         else:
-            track = current.get("track_id") or catalog.field("sound", "track_id").default_value
+            bedtime_sound = _history_values(request, context, scope="bedtime").get("sound", {})
+            bedtime_track = bedtime_sound.get("track_id")
+            if bedtime_sound.get("volume") != 0 and any(
+                track["track_id"] == bedtime_track for track in context.profile.tracks
+            ):
+                track = bedtime_track
+            else:
+                track = current.get("track_id") or catalog.field("sound", "track_id").default_value
     volume = slots.volume
     if volume is None:
         current_volume = current.get("volume")

@@ -271,10 +271,12 @@ class RequestRunTests(unittest.IsolatedAsyncioTestCase):
         ] * 2)
         contexts = [call.args[0] for call in agent.interpret_request.await_args_list]
         self.assertEqual(len(contexts), 6)
-        self.assertEqual(contexts[0].conversation, ())
-        self.assertEqual(contexts[1].request, later)
-        self.assertEqual([message.role for message in contexts[1].conversation], ["user", "agent"])
-        self.assertEqual(contexts[1].conversation[0].text, first["utterances"][0]["text"])
-        self.assertEqual(contexts[2].profile.user["user_id"], "user_2")
-        self.assertEqual(contexts[2].conversation, ())
-        self.assertEqual(contexts[3].conversation, ())
+        first_user = [context for context in contexts if context.profile.user["user_id"] == "user_1"]
+        second_user = [context for context in contexts if context.profile.user["user_id"] == "user_2"]
+        self.assertEqual([context.request for context in first_user], [first, later] * 2)
+        self.assertEqual([context.request for context in second_user], [unsupported] * 2)
+        for context in first_user[::2] + second_user:
+            self.assertEqual(context.conversation, ())
+        for context in first_user[1::2]:
+            self.assertEqual([message.role for message in context.conversation], ["user", "agent"])
+            self.assertEqual(context.conversation[0].text, first["utterances"][0]["text"])

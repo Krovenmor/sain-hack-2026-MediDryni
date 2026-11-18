@@ -12,7 +12,7 @@ from fastapi import FastAPI, Header, HTTPException
 from concierge_service.domain.answers import RunResult
 from concierge_service.domain.dataset import DatasetError
 from concierge_service.ports.hack_api import HackApiError
-from concierge_service.service.run_case import RunCase, UnsupportedCase
+from concierge_service.service.run_case import RunCase, RunDeadlineExceeded, UnsupportedCase
 from concierge_service.transport.http.schemas import (
     Case2Answers,
     RequestAnswer,
@@ -65,6 +65,10 @@ def create_app(
         except HackApiError as exc:
             raise HTTPException(
                 status_code=exc.status_code, detail={"code": exc.code}
+            ) from None
+        except RunDeadlineExceeded:
+            raise HTTPException(
+                status_code=504, detail={"code": "run_deadline_exceeded"}
             ) from None
         return _to_answers(result)
 

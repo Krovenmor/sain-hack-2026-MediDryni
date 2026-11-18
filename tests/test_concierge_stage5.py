@@ -115,6 +115,24 @@ class ExtendedActionTests(unittest.TestCase):
         )
         self.assertEqual(STATE["sound"]["timer_minutes"], 15)
 
+    def test_sound_falls_back_to_confirmed_bedtime_track_when_no_favorite_is_known(self):
+        hints = preference_hints("user_1").model_copy(update={"settings": [
+            observation("sound", "track_id", "track_1", None, scope="bedtime"),
+            observation("sound", "timer_minutes", 30, None, scope="bedtime"),
+        ]})
+        context = replace(
+            self.context,
+            profile=replace(self.context.profile, tracks=({"track_id": "track_1"},)),
+            preference_hints=hints,
+        )
+        interpreted = interpretation("sound_on", track_id=None, volume=None, timer_minutes=None)
+        preferences = replace(PREFERENCES, favorite_track_ids=())
+
+        self.assertEqual(
+            plan_request(self.request, interpreted, context, preferences, catalog()),
+            (DevicePatch("sound", {"track_id": "track_1", "volume": 20}),),
+        )
+
     def test_modes_change_only_defined_settings(self):
         night = {patch.device_id: patch.values for patch in self._plan("going_to_bed")}
         self.assertEqual(night["light"], {"brightness": 0})

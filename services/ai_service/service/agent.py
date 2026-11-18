@@ -23,6 +23,10 @@ from ai_service.service.preferences import (
 from ai_service.service.request_interpretation import request_messages, validate_interpretation
 
 
+_PREFERENCE_SINGLE_MAX_TOKENS = 10_000
+_PREFERENCE_LENGTH_RETRY_MAX_TOKENS = 16_000
+
+
 class LlmAgent:
     def __init__(
         self, client: LlmClient, *, requests_per_minute: int = 30,
@@ -55,7 +59,7 @@ class LlmAgent:
                 parsed = await self._completions.run(
                     preference_messages(batch),
                     lambda text: parse_preference_batch(text, batch),
-                    deadline=deadline, max_tokens=1800 * len(batch) + 1000,
+                    deadline=deadline, max_tokens=_PREFERENCE_SINGLE_MAX_TOKENS * len(batch),
                     operation="preference_batch",
                     retry_invalid=False,
                 )
@@ -79,8 +83,9 @@ class LlmAgent:
         try:
             return await self._completions.run(
                 preference_messages([item]), item.parse,
-                deadline=deadline, max_tokens=4000, retry_invalid=retry_invalid,
-                length_retry_max_tokens=6000,
+                deadline=deadline, max_tokens=_PREFERENCE_SINGLE_MAX_TOKENS,
+                retry_invalid=retry_invalid,
+                length_retry_max_tokens=_PREFERENCE_LENGTH_RETRY_MAX_TOKENS,
                 operation="preference_single",
             )
         except AiAgentError as error:

@@ -21,7 +21,7 @@ from concierge_service.ports.ai import (
     ProfileContext,
     RequestContext,
 )
-from concierge_service.ports.dataset import DatasetSource
+from concierge_service.ports.dataset import DatasetSource, ParsedDataset
 from concierge_service.ports.hack_api import HackApi
 from concierge_service.ports.room import RoomApi, RoomApiError
 from concierge_service.ports.store import ConversationStore
@@ -31,12 +31,17 @@ from concierge_service.service.request_handler import RequestHandler
 from run_telemetry import log_context, log_event
 
 logger = logging.getLogger(__name__)
-_RUN_BUDGET_S = 45 * 60
+_RUN_BUDGET_S = 45 * 60 - 5  # Reserve time to validate and serialize the response.
+_REQUEST_USER_CONCURRENCY = 4
 _PREFERENCE_RETURN_GRACE_S = 0.25
 
 
 class UnsupportedCase(Exception):
     """The request targets a case other than case 2."""
+
+
+class RunDeadlineExceeded(Exception):
+    """The run expired before the input dataset could be loaded."""
 
 
 class RunCase:
@@ -48,7 +53,7 @@ class RunCase:
         sleep_planner: SleepPlanner,
         ai_agent: AiAgent,
         conversation_store_factory: Callable[[], ConversationStore],
-        preference_timeout_s: float = 240.0,
+        preference_timeout_s: float = 600.0,
     ) -> None:
         self._hack_api = hack_api
         self._room_api = room_api
@@ -82,9 +87,37 @@ class RunCase:
 
     async def _run(self, *, dataset_code: str | None, token: str) -> RunResult:
         deadline = asyncio.get_running_loop().time() + _RUN_BUDGET_S
-        parsed = await self._hack_api.get_case2_data(
-            dataset_code=dataset_code, token=token
+        time_limit = asyncio.timeout_at(deadline)
+        stays: list[StayAnswer] = []
+        requests_by_user: dict[str, list[RequestAnswer]] = {}
+        dataset_loaded = False
+        try:
+            async with time_limit:
+                parsed = await self._hack_api.get_case2_data(dataset_code=dataset_code, token=token)
+                dataset_loaded = True
+                await self._process_dataset(
+                    parsed, stays, requests_by_user, token=token, deadline=deadline
+                )
+        except TimeoutError:
+            if not time_limit.expired():
+                raise
+            if not dataset_loaded:
+                raise RunDeadlineExceeded from None
+            log_event(logger, "run_deadline_reached", level=logging.WARNING)
+        return RunResult(
+            stays=tuple(stays),
+            requests=tuple(answer for answers in requests_by_user.values() for answer in answers),
         )
+
+    async def _process_dataset(
+        self,
+        parsed: ParsedDataset,
+        stays: list[StayAnswer],
+        requests_by_user: dict[str, list[RequestAnswer]],
+        *,
+        token: str,
+        deadline: float,
+    ) -> None:
         index = build_dataset_index(parsed.dataset)
         log_event(
             logger, "dataset_loaded", users=len(index.users_by_id), stays=len(index.stays_by_id),
@@ -112,7 +145,6 @@ class RunCase:
                         if "track_id" in setting_values({"track_id": track})
                     ],
                 )
-        answers: list[StayAnswer] = []
         profile_numbers = {user_id: number for number, user_id in enumerate(profiles, 1)}
         for stay in parsed.dataset.stays:
             try:
@@ -152,13 +184,12 @@ class RunCase:
                         **catalog_failure(exc.__cause__),
                     )
                 continue
-            answers.append(StayAnswer(stay.record_id, str(session.session_id)))
+            stays.append(StayAnswer(stay.record_id, str(session.session_id)))
             log_event(logger, "stay_finished", record_id=stay.record_id, steps=len(steps))
-        request_answers = await self._process_requests(
+        await self._process_requests(
             index, parsed.source, profiles, hints_by_user, preferences_by_user,
-            token=token, deadline=deadline,
+            requests_by_user, token=token, deadline=deadline,
         )
-        return RunResult(stays=tuple(answers), requests=request_answers)
 
     async def _extract_preferences(
         self, profiles: dict[str, ProfileContext], *, deadline: float
@@ -209,40 +240,48 @@ class RunCase:
         profiles: dict[str, ProfileContext],
         hints: dict[str, PreferenceHints],
         preferences: dict[str, ResolvedPreferences],
+        requests_by_user: dict[str, list[RequestAnswer]],
         *,
         token: str,
         deadline: float,
-    ) -> tuple[RequestAnswer, ...]:
+    ) -> None:
         store = self._conversation_store_factory()
-        answers: list[RequestAnswer] = []
-        for profile_number, (user_id, requests) in enumerate(index.requests_by_user.items(), 1):
-            for request in requests:
-                context = RequestContext(
-                    profile=profiles[user_id],
-                    request=source.requests_by_id[request.record_id],
-                    stay=source.stays_by_id[request.stay_id],
-                    intents=source.intents,
-                    conversation=store.history(user_id),
-                    preference_hints=hints.get(user_id),
-                )
-                with log_context(record_id=request.record_id, profile_number=profile_number):
-                    answer = await self._request_handler.handle(
-                        request, context, index.device_fields_by_device,
-                        preferences=preferences[user_id], token=token, deadline=deadline,
+        user_slots = asyncio.Semaphore(_REQUEST_USER_CONCURRENCY)
+
+        async def process_user(user_id: str, profile_number: int) -> None:
+            async with user_slots:
+                for request in index.requests_by_user[user_id]:
+                    context = RequestContext(
+                        profile=profiles[user_id],
+                        request=source.requests_by_id[request.record_id],
+                        stay=source.stays_by_id[request.stay_id],
+                        intents=source.intents,
+                        conversation=store.history(user_id),
+                        preference_hints=hints.get(user_id),
                     )
-                if answer is None:
-                    continue
-                answers.append(answer)
-                utterances = tuple(
-                    DialogueMessage(role="user", at=item.at.isoformat(), text=item.text)
-                    for item in request.utterances
-                )
-                replies = tuple(
-                    DialogueMessage(role=reply.role, at=reply.at, text=reply.text)
-                    for reply in answer.replies
-                )
-                store.append(user_id, utterances + replies)
-        return tuple(answers)
+                    with log_context(record_id=request.record_id, profile_number=profile_number):
+                        answer = await self._request_handler.handle(
+                            request, context, index.device_fields_by_device,
+                            preferences=preferences[user_id], token=token, deadline=deadline,
+                        )
+                    if answer is None:
+                        continue
+                    requests_by_user[user_id].append(answer)
+                    utterances = tuple(
+                        DialogueMessage(role="user", at=item.at.isoformat(), text=item.text)
+                        for item in request.utterances
+                    )
+                    replies = tuple(
+                        DialogueMessage(role=reply.role, at=reply.at, text=reply.text)
+                        for reply in answer.replies
+                    )
+                    store.append(user_id, utterances + replies)
+
+        async with asyncio.TaskGroup() as tasks:
+            for profile_number, (user_id, requests) in enumerate(index.requests_by_user.items(), 1):
+                if requests:
+                    requests_by_user[user_id] = []
+                    tasks.create_task(process_user(user_id, profile_number))
 
 
 def _build_profiles(index: DatasetIndex, source: DatasetSource) -> dict[str, ProfileContext]:

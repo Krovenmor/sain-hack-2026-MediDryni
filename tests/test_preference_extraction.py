@@ -190,10 +190,10 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
             result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
 
         self.assertEqual(result, [PreferenceFailure(user_id="guest", error="invalid_response")])
-        self.assertEqual([body["max_tokens"] for body in requests], [4000, 6000])
+        self.assertEqual([body["max_tokens"] for body in requests], [10_000, 16_000])
         self.assertEqual(requests[0]["messages"], requests[1]["messages"])
         events = [json.loads(record.getMessage()) for record in logs.records]
-        self.assertEqual([event["max_tokens"] for event in events], [4000, 6000])
+        self.assertEqual([event["max_tokens"] for event in events], [10_000, 16_000])
 
     async def test_schema_error_retries_single_profile_with_original_limit_and_correction(self):
         requests = []
@@ -212,7 +212,7 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
                   if entry["type"] == "extra_forbidden"]
         self.assertEqual(issue["path"], ["<variant>"])
         self.assertNotIn("private-", "\n".join(logs.output))
-        self.assertEqual([body["max_tokens"] for body in requests], [4000, 4000])
+        self.assertEqual([body["max_tokens"] for body in requests], [10_000, 10_000])
         first, second = [body["messages"] for body in requests]
         self.assertEqual(first[1:], second[1:])
         self.assertIn("Предыдущий результат не прошёл проверку", second[0]["content"])
@@ -240,8 +240,30 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]["rejected"], {"preference_schema": 1})
         self.assertEqual(events[-1]["reason"], "preference_schema")
         self.assertEqual(calls, [["first", "second"], "first"])
-        self.assertEqual(budgets, [4600, 4000])
+        self.assertEqual(budgets, [20_000, 10_000])
         self.assertEqual(results, [
             PreferenceFailure(user_id="first", error="invalid_response"),
             PreferenceHints.model_validate(hints("second")),
         ])
+
+    async def test_length_fallback_for_three_profiles_uses_full_single_profile_budget(self):
+        budgets = []
+        user_ids = ["first", "second", "third"]
+
+        def handle(request):
+            body = json.loads(request.content)
+            budgets.append(body["max_tokens"])
+            payload = json.loads(body["messages"][1]["content"])
+            if isinstance(payload, list):
+                self.assertEqual([item["user"]["user_id"] for item in payload], user_ids)
+                return httpx.Response(200, json={
+                    "choices": [{"finish_reason": "length", "message": {"content": "truncated"}}],
+                })
+            return completion(hints(payload["user"]["user_id"]))
+
+        agent = self.make_agent(handle, batch_size=3)
+        results = await agent.extract_preference_hints(
+            [profile(user_id) for user_id in user_ids], timeout_s=1
+        )
+        self.assertEqual(budgets, [30_000, 10_000, 10_000, 10_000])
+        self.assertEqual(results, [PreferenceHints.model_validate(hints(user_id)) for user_id in user_ids])

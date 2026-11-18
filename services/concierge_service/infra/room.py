@@ -10,6 +10,7 @@ from pydantic import Field, ValidationError
 
 from concierge_service.domain.action_planner import DevicePatch
 from concierge_service.domain.scenario import ScenarioStep
+from concierge_service.infra.http_retry import request_with_retry
 from concierge_service.infra.wire import DeviceState, Identifier, RoomState, Timestamp, WireModel
 from concierge_service.ports.room import (
     RoomApiError,
@@ -92,6 +93,7 @@ class RoomApiAdapter:
             _SessionPayload,
             token=token,
             json={"record_id": record_id, "kind": kind},
+            retry=True,
         )
         if payload.record_id != record_id or payload.kind != kind:
             raise RoomApiError("session does not match the record")
@@ -166,15 +168,19 @@ class RoomApiAdapter:
         token: str,
         json: object = None,
         params: dict[str, str] | None = None,
+        retry: bool = False,
     ) -> Payload:
+        url = f"{self._base_url}{path}"
+        headers = {"Authorization": f"Bearer {token}"}
         try:
-            response = await self._client.request(
-                method,
-                f"{self._base_url}{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                json=json,
-                params=params,
-            )
+            if method == "GET" or retry:
+                response = await request_with_retry(
+                    self._client, method, url, headers=headers, json=json, params=params
+                )
+            else:
+                response = await self._client.request(
+                    method, url, headers=headers, json=json, params=params
+                )
         except httpx.HTTPError:
             raise RoomApiError("simulator unavailable") from None
         if response.status_code != 200:
