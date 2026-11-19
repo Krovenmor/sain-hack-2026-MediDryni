@@ -2,6 +2,7 @@
 
 import logging
 from collections import Counter
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -18,14 +19,17 @@ from concierge_service.ports.ai import (
     AlarmSetInterpretation,
     AlarmShiftBy,
     AlarmShiftInterpretation,
+    ConfirmedMessageSetting,
     CurtainsInterpretation,
     DoNotDisturbInterpretation,
     NumericInterpretation,
+    ObservedSetting,
     PastSettingsInterpretation,
     RelativeAmount,
     RequestContext,
     RequestInterpretation,
     SettingContext,
+    SourceRef,
     SoundInterpretation,
 )
 from concierge_service.service.diagnostics import setting_values
@@ -91,7 +95,8 @@ def plan_request(
     elif isinstance(interpreted, PastSettingsInterpretation):
         days_ago = interpreted.slots.days_ago
         changes = _history_values(
-            request, context, scope="past_stay", days_ago=1 if days_ago is None else days_ago
+            request, context, scope="past_stay", days_ago=1 if days_ago is None else days_ago,
+            confirmations=interpreted.slots.confirmed_settings,
         )
         if not changes:
             raise ActionPlanError("missing_history")
@@ -182,15 +187,23 @@ def _history_values(
     *,
     scope: SettingContext,
     days_ago: int | None = None,
+    confirmations: Sequence[ConfirmedMessageSetting] = (),
 ) -> dict[str, dict[str, JSONScalar]]:
     hints = context.preference_hints
-    if hints is None or hints.user_id != request.user_id:
-        log_event(
-            logger, "history_selection", level=logging.DEBUG, scope=scope,
-            days_ago=days_ago, observations=0, dated_observations=0,
-            eligible_observations=0, selected_fields=0,
-        )
-        return {}
+    settings = list(hints.settings) if hints and hints.user_id == request.user_id else []
+    if confirmations:
+        timestamps = {
+            message["message_id"]: message["at"] for message in context.profile.chat_history
+            if message["user_id"] == request.user_id and message["role"] == "agent"
+        }
+        for fact in confirmations:
+            at = timestamps.get(fact.message_id)
+            if isinstance(at, str):
+                settings.append(ObservedSetting(
+                    context="past_stay", observed_at=at, device_id=fact.device_id,
+                    field_id=fact.field_id, value=fact.value,
+                    sources=[SourceRef(kind="message", source_id=fact.message_id)],
+                ))
 
     zone = _hotel_zone(context)
     request_day = request.at.astimezone(zone).date()
@@ -202,7 +215,7 @@ def _history_values(
     selected: dict[tuple[str, str], tuple[datetime, set[JSONScalar]]] = {}
     skipped: Counter[str] = Counter()
     observations = dated_observations = eligible_observations = 0
-    for setting in hints.settings:
+    for setting in settings:
         if setting.context != scope:
             continue
         observations += 1

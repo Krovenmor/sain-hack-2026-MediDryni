@@ -7,6 +7,7 @@ import httpx
 
 from ai_service.infra.llm_client import LlmClient
 from ai_service.service.agent import LlmAgent
+from ai_service.service.context import compact_json
 from ai_service.service.preferences import PreferenceInput
 from concierge_service.ports.ai import PreferenceFailure, PreferenceHints, ProfileContext
 
@@ -155,14 +156,13 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
     def test_chat_over_either_limit_still_uses_evidence_and_its_neighbors(self):
         cue = {"user_id": "guest", "message_id": "cue", "text": "Люблю шум дождя."}
         filler = {"user_id": "guest", "message_id": "neutral", "text": "Спасибо."}
-        for earlier in (
-            [filler | {"message_id": str(i)} for i in range(11)],
-            [filler | {"text": "Спасибо. " * 260}],
-        ):
-            with self.subTest(earlier_messages=len(earlier)):
-                item = replace(profile(), chat_history=[*earlier, filler, cue])
-                prepared = PreferenceInput(item, "guest", profile_number=1)
-                self.assertEqual(prepared.payload()["chat_history"], [filler, cue])
+        later = [filler | {"message_id": str(i)} for i in range(12)]
+        oversized = filler | {"message_id": "oversized", "text": "Спасибо. " * 260}
+        item = replace(profile(), chat_history=[cue, filler, *later, oversized])
+        prepared = PreferenceInput(item, "guest", profile_number=1)
+        selected = prepared.payload()["chat_history"]
+        self.assertEqual(selected, [cue, filler, *later[-10:]])
+        self.assertLessEqual(len(compact_json(selected)), 2100)
 
     async def test_individual_failure_preserves_input_order_and_empty_hints(self):
         calls = []

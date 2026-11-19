@@ -7,7 +7,7 @@ import httpx
 
 from ai_service.infra.llm_client import LlmClient
 from ai_service.service.agent import LlmAgent
-from ai_service.service.request_interpretation import request_messages
+from ai_service.service.request_interpretation import request_payload
 from concierge_service.ports.ai import AiAgentError, DialogueMessage, Intent, ProfileContext, RequestContext
 
 
@@ -272,8 +272,31 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                     DialogueMessage(role="agent", at=AT, text="Изменил положение штор."),
                 ]
                 item = replace(request_context(follow_up), conversation=history)
-                payload = json.loads(request_messages(item)[1]["content"])
+                payload = request_payload(item)
                 self.assertEqual(payload["conversation"], [message.model_dump() for message in history])
+
+    async def test_past_settings_require_an_agent_message_selected_for_this_guest(self):
+        message = {"user_id": "guest", "message_id": "sent", "role": "agent", "at": AT,
+                   "text": "Установил температуру 19 °C."}
+        item = request_context("Сделай как вчера")
+        item = replace(item, profile=replace(item.profile, chat_history=[
+            message, message | {"message_id": "other", "user_id": "other_guest"},
+            message | {"message_id": "asked", "role": "user"},
+            message | {"message_id": "oversized", "text": "Сведения о номере " * 100},
+        ]))
+        for source in ("sent", "other", "asked", "oversized", "missing"):
+            with self.subTest(source=source):
+                setting = {"message_id": source, "device_id": "climate", "field_id": "target", "value": 19}
+                agent = self.make_agent(lambda _: completion(json.dumps({
+                    "record_id": "request_1", "intent": "like_yesterday",
+                    "slots": {"confirmed_settings": [setting]},
+                })))
+                if source == "sent":
+                    result = await agent.interpret_request(item, timeout_s=1)
+                    self.assertEqual(result.slots.confirmed_settings[0].model_dump(), setting)
+                else:
+                    with self.assertRaisesRegex(AiAgentError, "invalid_response"):
+                        await agent.interpret_request(item, timeout_s=1)
 
     async def test_yesterday_keeps_matching_stay_note_ahead_of_later_notes(self):
         item = request_context("Сделай как вчера")

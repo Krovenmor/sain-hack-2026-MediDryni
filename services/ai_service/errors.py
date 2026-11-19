@@ -14,7 +14,7 @@ _SCHEMA_FIELDS = frozenset({
     "observed_at", "device_id", "field_id", "value", "sources", "kind", "source_id", "pointer",
     "record_id", "intent", "slots", "mode", "amount", "enabled", "position", "minutes",
     "target_at", "alarm_mode", "window_minutes", "track_id", "volume", "timer_minutes",
-    "days_ago", "subject", "requested_value", "reason",
+    "days_ago", "confirmed_settings", "message_id", "subject", "requested_value", "reason",
 })
 
 

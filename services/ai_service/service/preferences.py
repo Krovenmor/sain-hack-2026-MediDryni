@@ -42,20 +42,21 @@ _PROFILE_FIELDS = (
 def _select_messages(messages: Sequence[JsonObject], user_id: str) -> list[JsonObject]:
     history = [message for message in messages if message["user_id"] == user_id]
     budget, max_items = 2100, 12
-    if len(history) <= max_items and len(compact_json(history)) <= budget:
-        return history
-
-    relevant_turns = {
-        neighbor
+    adjacent_ids = {
+        history[neighbor]["message_id"]
         for index, message in enumerate(history)
         if preference_evidence(message) >= 2
         for neighbor in range(max(0, index - 1), min(len(history), index + 2))
     }
-    return bounded_history(
-        [message for index, message in enumerate(history)
-         if index in relevant_turns or preference_evidence(message) > 0],
-        budget=budget, max_items=max_items, priority=preference_evidence,
-    )
+
+    def priority(message: JsonObject) -> int:
+        score = preference_evidence(message)
+        if score or message["message_id"] in adjacent_ids:
+            return score
+        return -1
+
+    # bounded_history counts one separator per item; reserve the remaining JSON bracket.
+    return bounded_history(history, budget=budget - 1, max_items=max_items, priority=priority)
 
 
 class PreferenceInput:

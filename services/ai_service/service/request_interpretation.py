@@ -12,6 +12,7 @@ from concierge_service.ports.ai import (
     REQUEST_INTERPRETATION_ADAPTER,
     AiAgentError,
     JsonObject,
+    PastSettingsInterpretation,
     RequestContext,
     RequestInterpretation,
 )
@@ -41,7 +42,7 @@ _FOLLOW_UP = re.compile(
 _ALARM_REFERENCE = re.compile(r"будиль|разбуд|позже|раньше|сдвин|передвин|перенеси")
 
 
-def request_messages(item: RequestContext) -> list[dict[str, str]]:
+def request_payload(item: RequestContext) -> dict[str, object]:
     utterances = cast(list[JsonObject], item.request["utterances"])
     query = " ".join(record_text(record) for record in utterances).casefold()
     relevant = _reference_context(item, query)
@@ -64,6 +65,10 @@ def request_messages(item: RequestContext) -> list[dict[str, str]]:
             observed_settings=len(selected.get("observed_settings", ())),
             includes_target_wake="target_wake_at" in payload,
         )
+    return payload
+
+
+def request_messages(payload: dict[str, object]) -> list[dict[str, str]]:
     return [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {
@@ -147,7 +152,9 @@ def _mentions_day(entry: JsonObject, day: date, zone: object) -> bool:
     return any(_local_day(entry.get(key), zone) == day for key in ("observed_at", "started_at", "at"))
 
 
-def validate_interpretation(text: str, item: RequestContext) -> RequestInterpretation:
+def validate_interpretation(
+    text: str, item: RequestContext, payload: dict[str, object]
+) -> RequestInterpretation:
     try:
         result = REQUEST_INTERPRETATION_ADAPTER.validate_json(text)
     except ValidationError as invalid:
@@ -166,6 +173,19 @@ def validate_interpretation(text: str, item: RequestContext) -> RequestInterpret
     if result.intent == "sound_on" and result.slots.track_id is not None:
         if not any(track["track_id"] == result.slots.track_id for track in item.profile.tracks):
             raise InvalidModelOutput("interpretation_track_catalog")
+    if isinstance(result, PastSettingsInterpretation) and result.slots.confirmed_settings:
+        history = cast(list[JsonObject], payload.get("chat_history", []))
+        confirmations = {
+            row["message_id"] for row in history
+            if row["role"] == "agent" and row["user_id"] == item.profile.user["user_id"]
+        }
+        for setting in result.slots.confirmed_settings:
+            if setting.message_id not in confirmations:
+                raise InvalidModelOutput("interpretation_confirmation_source")
+            if (setting.device_id, setting.field_id) == ("sound", "track_id") and not any(
+                track["track_id"] == setting.value for track in item.profile.tracks
+            ):
+                raise InvalidModelOutput("interpretation_track_catalog")
     if result.intent == "invalid_value":
         value = result.slots.requested_value
         if isinstance(value, float) and not isfinite(value):

@@ -20,7 +20,7 @@ from ai_service.service.preferences import (
     parse_preference_batch,
     preference_messages,
 )
-from ai_service.service.request_interpretation import request_messages, validate_interpretation
+from ai_service.service.request_interpretation import request_messages, request_payload, validate_interpretation
 
 
 _PREFERENCE_SINGLE_MAX_TOKENS = 10_000
@@ -96,8 +96,9 @@ class LlmAgent:
         self, item: RequestContext, *, timeout_s: float
     ) -> RequestInterpretation:
         deadline = _deadline(timeout_s)
+        payload = request_payload(item)
         return await self._completions.run(
-            request_messages(item), lambda text: validate_interpretation(text, item),
+            request_messages(payload), lambda text: validate_interpretation(text, item, payload),
             deadline=deadline, max_tokens=1500,
             operation="interpret_request",
         )

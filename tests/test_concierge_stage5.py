@@ -169,6 +169,19 @@ class ExtendedActionTests(unittest.TestCase):
         with self.assertRaisesRegex(ActionPlanError, "^missing_history$"):
             self._plan("like_yesterday", days_ago=4)
 
+    def test_yesterday_resolves_direct_confirmation_on_its_hotel_day_without_profile_hints(self):
+        # 01:00 in the source zone is 21:00 on the previous day in the hotel.
+        message = {"user_id": "user_1", "message_id": "ok", "role": "agent",
+                   "at": "2026-11-20T01:00:00+07:00", "text": "Установил 18 °C."}
+        self.context = replace(self.context, profile=replace(self.context.profile, chat_history=[message]))
+        setting = {"message_id": "ok", "device_id": "climate", "field_id": "temperature_c", "value": 18}
+        self.assertEqual(self._plan("like_yesterday", confirmed_settings=[setting]),
+                         (DevicePatch("climate", {"temperature_c": 18}),))
+        with self.assertRaisesRegex(ActionPlanError, "missing_history"):
+            self._plan("like_yesterday", days_ago=0, confirmed_settings=[setting])
+        with self.assertRaisesRegex(ActionPlanError, "invalid_value"):
+            self._plan("like_yesterday", confirmed_settings=[setting | {"value": 80}])
+
     def test_yesterday_replays_only_confirmed_sound_and_climate_settings(self):
         observed_at = "2026-11-19T23:05:30+03:00"
         self.context = replace(self.context, preference_hints=preference_hints("user_1").model_copy(

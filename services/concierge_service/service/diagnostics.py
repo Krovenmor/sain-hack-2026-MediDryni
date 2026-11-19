@@ -68,9 +68,13 @@ def interpretation_slots(interpretation: RequestInterpretation) -> dict[str, obj
         if isinstance(slots, AlarmShiftBy):
             return slots.model_dump()
         return slots.model_dump(exclude={"target_at"}) | {"target_at_present": True}
+    if isinstance(interpretation, PastSettingsInterpretation):
+        return {
+            "days_ago": interpretation.slots.days_ago,
+            "confirmed_fields": len(interpretation.slots.confirmed_settings),
+        }
     if isinstance(interpretation, (
         NumericInterpretation, CurtainsInterpretation, DoNotDisturbInterpretation,
-        PastSettingsInterpretation,
     )):
         return interpretation.slots.model_dump()
     return {}

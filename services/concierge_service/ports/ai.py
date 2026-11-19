@@ -235,6 +235,13 @@ class InvalidValueInterpretation(InterpretationBase):
     slots: InvalidValueSlots
 
 
+class ConfirmedMessageSetting(DTO):
+    message_id: Identifier
+    device_id: Identifier
+    field_id: Identifier
+    value: Scalar
+
+
 class PastSettingsSlots(DTO):
     """Relative lookback for the single external `like_yesterday` intent.
 
@@ -244,6 +251,7 @@ class PastSettingsSlots(DTO):
     """
 
     days_ago: Annotated[int, Field(ge=0)] | None = None
+    confirmed_settings: list[ConfirmedMessageSetting] = Field(default_factory=list)
 
 
 class PastSettingsInterpretation(InterpretationBase):
