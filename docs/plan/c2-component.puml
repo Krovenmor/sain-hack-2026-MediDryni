@@ -6,9 +6,10 @@ skinparam defaultFontName "DejaVu Sans"
 skinparam defaultFontSize 14
 skinparam defaultFontColor #0F172A
 skinparam titleFontSize 20
+skinparam packageTitleAlignment left
 skinparam titleFontColor #0F172A
 skinparam shadowing false
-skinparam linetype ortho
+skinparam linetype polyline
 skinparam nodesep 45
 skinparam ranksep 50
 skinparam roundCorner 12
@@ -36,12 +37,12 @@ rectangle "Hack API\nНабор данных" as dataset #FFFFFF
 rectangle "Симулятор номера\nСеансы, сценарии, действия" as room #FFFFFF
 rectangle "Прокси LLM" as llm #FFFFFF
 
-caller --> http
-http --> core
-core --> ai
-core --> adapters
-core --> store
-adapters --> dataset
-adapters --> room
-ai --> llm
+caller --> http : запускает прогон по HTTP
+http --> core : передаёт запрос
+core --> ai : <back:#F8FAFC>вызывает AiAgent</back>
+core --> adapters : получает данные\nи управляет номером
+core --> store : читает и дополняет\nдиалог гостя
+adapters --> dataset : загружает набор
+adapters --> room : создаёт сеансы, загружает\nсценарии, применяет действия
+ai --> llm : отправляет контекст\nдля разбора
 @enduml
