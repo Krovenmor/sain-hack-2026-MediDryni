@@ -7,6 +7,7 @@ import httpx
 
 from ai_service.infra.llm_client import LlmClient
 from ai_service.service.agent import LlmAgent
+from ai_service.service.preferences import PreferenceInput
 from concierge_service.ports.ai import PreferenceFailure, PreferenceHints, ProfileContext
 
 
@@ -137,6 +138,31 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
 
         result = await self.make_agent(handle).extract_preference_hints([item], timeout_s=1)
         self.assertEqual(result, [PreferenceHints.model_validate(payload)])
+
+    def test_short_chat_keeps_the_guests_own_messages_in_order(self):
+        first = {"user_id": "guest", "message_id": "first", "text": "Доброе утро."}
+        second = {"user_id": "guest", "message_id": "second", "text": "От резкого звонка вскакиваю."}
+        foreign = first | {"user_id": "other", "message_id": "foreign"}
+        item = replace(profile(), chat_history=[first, foreign, second])
+        prepared = PreferenceInput(item, "guest", profile_number=1)
+        self.assertEqual(prepared.payload()["chat_history"], [first, second])
+        prepared.validate(PreferenceHints.model_validate(hints(
+            gentle_alarm={"value": True, "sources": [source("message", "second", "/text")]},
+        )))
+        expired = PreferenceInput(item, "guest", profile_number=1, include_history=False)
+        self.assertEqual(expired.payload()["chat_history"], [])
+
+    def test_chat_over_either_limit_still_uses_evidence_and_its_neighbors(self):
+        cue = {"user_id": "guest", "message_id": "cue", "text": "Люблю шум дождя."}
+        filler = {"user_id": "guest", "message_id": "neutral", "text": "Спасибо."}
+        for earlier in (
+            [filler | {"message_id": str(i)} for i in range(11)],
+            [filler | {"text": "Спасибо. " * 260}],
+        ):
+            with self.subTest(earlier_messages=len(earlier)):
+                item = replace(profile(), chat_history=[*earlier, filler, cue])
+                prepared = PreferenceInput(item, "guest", profile_number=1)
+                self.assertEqual(prepared.payload()["chat_history"], [filler, cue])
 
     async def test_individual_failure_preserves_input_order_and_empty_hints(self):
         calls = []

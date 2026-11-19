@@ -39,6 +39,25 @@ _PROFILE_FIELDS = (
 )
 
 
+def _select_messages(messages: Sequence[JsonObject], user_id: str) -> list[JsonObject]:
+    history = [message for message in messages if message["user_id"] == user_id]
+    budget, max_items = 2100, 12
+    if len(history) <= max_items and len(compact_json(history)) <= budget:
+        return history
+
+    relevant_turns = {
+        neighbor
+        for index, message in enumerate(history)
+        if preference_evidence(message) >= 2
+        for neighbor in range(max(0, index - 1), min(len(history), index + 2))
+    }
+    return bounded_history(
+        [message for index, message in enumerate(history)
+         if index in relevant_turns or preference_evidence(message) > 0],
+        budget=budget, max_items=max_items, priority=preference_evidence,
+    )
+
+
 class PreferenceInput:
     def __init__(
         self, item: ProfileContext, user_id: str, *, profile_number: int, include_history: bool = True
@@ -52,18 +71,7 @@ class PreferenceInput:
              and preference_evidence(event) > 0],
             budget=2600, max_items=12, priority=preference_evidence,
         ) if include_history else []
-        history = [message for message in item.chat_history if message["user_id"] == user_id]
-        relevant_turns = {
-            neighbor
-            for index, message in enumerate(history)
-            if preference_evidence(message) >= 2
-            for neighbor in range(max(0, index - 1), min(len(history), index + 2))
-        } if include_history else set()
-        self._messages = bounded_history(
-            [message for index, message in enumerate(history)
-             if index in relevant_turns or preference_evidence(message) > 0],
-            budget=2100, max_items=12, priority=preference_evidence,
-        ) if include_history else []
+        self._messages = _select_messages(item.chat_history, user_id) if include_history else []
 
     @property
     def user_id(self) -> str:
