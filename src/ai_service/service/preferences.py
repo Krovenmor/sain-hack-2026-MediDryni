@@ -24,6 +24,7 @@ from ai_service.service.context import (
     preference_evidence,
     track_catalog,
 )
+from ai_service.service.history_evidence import ConfirmationHistory
 from ai_service.service.output_validation import InvalidModelOutput, validation_reason
 from shared.telemetry import log_event
 
@@ -104,6 +105,19 @@ class PreferenceInput:
         except ValidationError as error:
             raise InvalidModelOutput(validation_reason(error, "preference_schema")) from None
         self.validate(hints)
+        evidence = ConfirmationHistory(self._item.chat_history, self._messages, self._user_id)
+        settings = []
+        for setting in hints.settings:
+            if setting.context == "past_stay" and not any(s.kind == "event" for s in setting.sources):
+                ids = {s.source_id for s in setting.sources}
+                if not any(evidence.supports_observation(
+                    source_id, ids, setting, self._item.tracks,
+                ) for source_id in ids):
+                    continue
+            settings.append(setting)
+        if len(settings) != len(hints.settings):
+            log_event(logger, "history_observation_rejected", dropped=len(hints.settings) - len(settings))
+            return hints.model_copy(update={"settings": settings})
         return hints
 
     def validate(self, hints: PreferenceHints) -> None:

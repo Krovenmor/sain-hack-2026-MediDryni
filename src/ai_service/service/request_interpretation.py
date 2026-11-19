@@ -26,6 +26,7 @@ from ai_service.service.context import (
     record_text,
     track_catalog,
 )
+from ai_service.service.history_evidence import ConfirmationHistory
 from ai_service.service.output_validation import InvalidModelOutput, validation_reason
 from shared.telemetry import log_event
 
@@ -88,15 +89,14 @@ def _reference_context(item: RequestContext, query: str) -> dict[str, object]:
 
     def priority(entry: JsonObject) -> int:
         matched_day = day is not None and _mentions_day(entry, day, item.stay["hotel_timezone"])
-        return (10 if matched_day else 0) + (preference_evidence(entry) if past or home else 0)
+        return (10 if matched_day else 0) + (preference_evidence(entry))
 
     conversation = bounded_history(
-        [message.model_dump(mode="json") for message in item.conversation],
+        [message.model_dump(mode="json", exclude_none=True) for message in item.conversation],
         budget=1000, max_items=len(item.conversation), query=query, recent=2,
         priority=priority if past or home else None,
     )
-    if not (past or home or follow_up):
-        return {"conversation": conversation} if conversation else {}
+    expanded = past or home or follow_up
 
     user_id = item.profile.user["user_id"]
     history = [
@@ -105,14 +105,16 @@ def _reference_context(item: RequestContext, query: str) -> dict[str, object]:
     events = [
         row for row in item.profile.events if row["user_id"] == user_id
         and preference_evidence(row) >= 2
-    ] if past or home else []
+    ]
     result: dict[str, object] = {
         "conversation": conversation,
         "chat_history": bounded_history(
-            history, budget=650, max_items=3, query=query, priority=priority,
+            history, budget=649 if expanded else 419, max_items=3 if expanded else 2,
+            query=query, priority=priority, pair_replies=True,
         ),
         "events": bounded_history(
-            events, budget=850, max_items=3, query=query, priority=priority,
+            events, budget=849 if expanded else 299, max_items=3 if expanded else 1,
+            query=query, priority=priority,
         ),
     }
     hints = item.preference_hints
@@ -129,11 +131,18 @@ def _reference_context(item: RequestContext, query: str) -> dict[str, object]:
 
 
 def _past_day(item: RequestContext, query: str) -> date | None:
-    match = re.search(r"\b(\d{1,4})\s+(?:дня|дней|день) назад\b", query)
-    if not match and "вчера" not in query:
+    match = re.search(r"\b(\d{1,4}|два|три)\s+(?:дня|дней|день) назад\b", query)
+    if match:
+        count = match[1]
+        days = int(count) if count.isdigit() else {"два": 2, "три": 3}[count]
+    elif re.search(r"\bпозавчера\b", query):
+        days = 2
+    elif re.search(r"\bвчера\b", query):
+        days = 1
+    else:
         return None
     at = _local_day(item.request["at"], item.stay["hotel_timezone"])
-    return at - timedelta(days=int(match[1]) if match else 1) if at else None
+    return at - timedelta(days=days) if at and at.toordinal() > days else None
 
 
 def _local_day(value: object, zone: object) -> date | None:
@@ -175,17 +184,20 @@ def validate_interpretation(
             raise InvalidModelOutput("interpretation_track_catalog")
     if isinstance(result, PastSettingsInterpretation) and result.slots.confirmed_settings:
         history = cast(list[JsonObject], payload.get("chat_history", []))
-        confirmations = {
-            row["message_id"] for row in history
-            if row["role"] == "agent" and row["user_id"] == item.profile.user["user_id"]
-        }
-        for setting in result.slots.confirmed_settings:
-            if setting.message_id not in confirmations:
-                raise InvalidModelOutput("interpretation_confirmation_source")
-            if (setting.device_id, setting.field_id) == ("sound", "track_id") and not any(
-                track["track_id"] == setting.value for track in item.profile.tracks
-            ):
-                raise InvalidModelOutput("interpretation_track_catalog")
+        evidence = ConfirmationHistory(item.profile.chat_history, history, str(item.profile.user["user_id"]))
+        supported = [
+            setting for setting in result.slots.confirmed_settings
+            if evidence.supports(
+                setting.message_id, setting.request_message_id, setting.quote, setting.device_id,
+                setting.field_id, setting.value, item.profile.tracks,
+            )
+        ]
+        dropped = len(result.slots.confirmed_settings) - len(supported)
+        if dropped:
+            log_event(logger, "history_confirmation_rejected", dropped=dropped, kept=len(supported))
+            result = result.model_copy(update={"slots": result.slots.model_copy(
+                update={"confirmed_settings": supported},
+            )})
     if result.intent == "invalid_value":
         value = result.slots.requested_value
         if isinstance(value, float) and not isfinite(value):

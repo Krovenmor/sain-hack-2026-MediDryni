@@ -14,6 +14,7 @@ def bounded_history(
     records: Sequence[JsonObject], *, budget: int, query: str = "",
     recent: int = 0, max_items: int,
     priority: Callable[[JsonObject], int] | None = None,
+    pair_replies: bool = False,
 ) -> list[JsonObject]:
     query_terms = _terms(query)
     serialized = [compact_json(record) for record in records]
@@ -27,11 +28,21 @@ def bounded_history(
         ),
         reverse=True,
     )
-    selected = []
+    selected: set[int] = set()
     for index in latest + remaining:
+        if index in selected:
+            continue
+        if pair_replies:
+            neighbor = index - 1 if records[index]["role"] == "agent" else index + 1
+            if (0 <= neighbor < len(records) and neighbor not in selected
+                    and records[neighbor]["role"] != records[index]["role"]
+                    and len(selected) + 2 <= max_items
+                    and len(serialized[index]) + len(serialized[neighbor]) + 2 <= budget):
+                selected.add(neighbor)
+                budget -= len(serialized[neighbor]) + 1
         size = len(serialized[index]) + 1
         if size <= budget:
-            selected.append(index)
+            selected.add(index)
             budget -= size
             if len(selected) >= max_items:
                 break

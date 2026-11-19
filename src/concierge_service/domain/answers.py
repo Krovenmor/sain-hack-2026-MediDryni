@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from concierge_service.domain.dataset import JSONScalar
+
 
 @dataclass(frozen=True)
 class StayAnswer:
@@ -25,6 +27,7 @@ class RequestAnswer:
     record_id: str
     session_id: str
     replies: tuple[ReplyAnswer, ...]
+    applied: dict[str, dict[str, JSONScalar]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

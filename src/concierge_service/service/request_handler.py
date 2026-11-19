@@ -10,7 +10,7 @@ from concierge_service.domain.action_planner import (
     patch_matches_state,
 )
 from concierge_service.domain.answers import RequestAnswer
-from concierge_service.domain.dataset import Request
+from concierge_service.domain.dataset import JSONScalar, Request
 from concierge_service.domain.device_catalog import DeviceFields, DeviceValueError
 from concierge_service.domain.sleep import ResolvedPreferences
 from concierge_service.ports.ai import (
@@ -46,6 +46,7 @@ class RequestHandler:
         deadline: float,
     ) -> RequestAnswer | None:
         started = monotonic()
+        applied: dict[str, dict[str, JSONScalar]] = {}
         intent = None
         ai_error = None
         try:
@@ -78,7 +79,7 @@ class RequestHandler:
                     intent=intent, slots=interpretation_slots(interpreted),
                 )
             outcome = await self._execute(
-                request, interpreted, context, preferences, catalog, session.session_id, token
+                request, interpreted, context, preferences, catalog, session.session_id, token, applied
             )
             replies = compose_replies(request, outcome, intent=interpreted.intent)
 
@@ -87,7 +88,7 @@ class RequestHandler:
             outcome=outcome, ai_error=ai_error, reply_class=replies[0].response_class,
             duration_ms=round((monotonic() - started) * 1000),
         )
-        return RequestAnswer(request.record_id, str(session.session_id), replies)
+        return RequestAnswer(request.record_id, str(session.session_id), replies, applied)
 
     async def _interpret(
         self, request: Request, context: RequestContext, deadline: float
@@ -110,6 +111,7 @@ class RequestHandler:
         catalog: DeviceFields,
         session_id: UUID,
         token: str,
+        applied: dict[str, dict[str, JSONScalar]],
     ) -> RequestOutcome:
         if interpreted.intent in ("medical", "out_of_scope"):
             return interpreted.intent
@@ -149,6 +151,9 @@ class RequestHandler:
                     )
                 if snapshot.at != request.at or not matched:
                     raise RoomApiError("simulator did not confirm the settings at the request time")
+                applied.setdefault(patch.device_id, {}).update(
+                    {field: snapshot.state[patch.device_id][field] for field in patch.values}
+                )
             except RoomApiError as exc:
                 log_event(
                     logger, "request_action_failed", level=logging.WARNING,

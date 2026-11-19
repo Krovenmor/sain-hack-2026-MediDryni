@@ -272,7 +272,7 @@ class RunCase:
                         for item in request.utterances
                     )
                     replies = tuple(
-                        DialogueMessage(role=reply.role, at=reply.at, text=reply.text)
+                        DialogueMessage(role=reply.role, at=reply.at, text=reply.text, applied=answer.applied or None)
                         for reply in answer.replies
                     )
                     store.append(user_id, utterances + replies)

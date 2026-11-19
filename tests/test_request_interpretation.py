@@ -81,7 +81,7 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 "hotel_timezone": "Europe/Moscow",
                 "devices": [device],
                 "tracks": item.profile.tracks,
-                "conversation": [old.model_dump()],
+                "conversation": [old.model_dump(exclude_none=True)],
             })
             return completion(json.dumps({
                 "record_id": "request_1", "intent": "warmer",
@@ -176,7 +176,7 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Передвинь его", "\n".join(logs.output))
         self.assertEqual(result.slots.minutes, 30)
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0]["conversation"], [entry.model_dump() for entry in item.conversation])
+        self.assertEqual(calls[0]["conversation"], [entry.model_dump(exclude_none=True) for entry in item.conversation])
         self.assertEqual(calls[0]["request"]["initial_state"], item.request["initial_state"])
 
     async def test_rejected_proxy_completion_counts_tokens_without_logging_content(self):
@@ -273,7 +273,7 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 ]
                 item = replace(request_context(follow_up), conversation=history)
                 payload = request_payload(item)
-                self.assertEqual(payload["conversation"], [message.model_dump() for message in history])
+                self.assertEqual(payload["conversation"], [message.model_dump(exclude_none=True) for message in history])
 
     async def test_past_settings_require_an_agent_message_selected_for_this_guest(self):
         message = {"user_id": "guest", "message_id": "sent", "role": "agent", "at": AT,
@@ -286,17 +286,17 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
         ]))
         for source in ("sent", "other", "asked", "oversized", "missing"):
             with self.subTest(source=source):
-                setting = {"message_id": source, "device_id": "climate", "field_id": "target", "value": 19}
+                setting = {"message_id": source, "device_id": "climate", "field_id": "temperature_c",
+                           "value": 19, "quote": "температуру 19 °C"}
                 agent = self.make_agent(lambda _: completion(json.dumps({
                     "record_id": "request_1", "intent": "like_yesterday",
                     "slots": {"confirmed_settings": [setting]},
                 })))
+                result = await agent.interpret_request(item, timeout_s=1)
                 if source == "sent":
-                    result = await agent.interpret_request(item, timeout_s=1)
-                    self.assertEqual(result.slots.confirmed_settings[0].model_dump(), setting)
+                    self.assertEqual(result.slots.confirmed_settings[0].model_dump(exclude_none=True), setting)
                 else:
-                    with self.assertRaisesRegex(AiAgentError, "invalid_response"):
-                        await agent.interpret_request(item, timeout_s=1)
+                    self.assertEqual(result.slots.confirmed_settings, [])
 
     async def test_yesterday_keeps_matching_stay_note_ahead_of_later_notes(self):
         item = request_context("Сделай как вчера")

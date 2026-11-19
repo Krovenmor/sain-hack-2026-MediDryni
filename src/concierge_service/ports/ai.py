@@ -113,6 +113,7 @@ class ProfileContext:
 
 
 class DialogueMessage(DTO):
+    applied: dict[Identifier, dict[Identifier, Scalar]] | None = None
     role: Literal["user", "agent"]
     at: OffsetTimestamp
     text: Annotated[str, Field(min_length=1)]
@@ -236,6 +237,8 @@ class InvalidValueInterpretation(InterpretationBase):
 
 
 class ConfirmedMessageSetting(DTO):
+    quote: Annotated[str, Field(min_length=1)]
+    request_message_id: Identifier | None = None
     message_id: Identifier
     device_id: Identifier
     field_id: Identifier

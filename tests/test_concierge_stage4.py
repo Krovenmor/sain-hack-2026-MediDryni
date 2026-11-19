@@ -127,6 +127,7 @@ class RequestHandlerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.room.apply_action.await_count, 2)
         self.assertEqual(answer.replies[0].response_class, "refused")
         self.assertIn("Часть изменений применил", answer.replies[0].text)
+        self.assertEqual(answer.applied, {"light": {"brightness": 0}})
 
     async def test_already_satisfied_state_returns_done_without_action(self) -> None:
         self.request = replace(self.request, initial_state={
@@ -168,6 +169,7 @@ class RequestHandlerTests(unittest.IsolatedAsyncioTestCase):
             answer = await self._handle(catalog())
         self.assertEqual(answer.replies[0].response_class, "refused")
         self.room.apply_action.assert_awaited_once()
+        self.assertEqual(answer.applied, {})
 
 
 class RequestRunTests(unittest.IsolatedAsyncioTestCase):
@@ -280,3 +282,4 @@ class RequestRunTests(unittest.IsolatedAsyncioTestCase):
         for context in first_user[1::2]:
             self.assertEqual([message.role for message in context.conversation], ["user", "agent"])
             self.assertEqual(context.conversation[0].text, first["utterances"][0]["text"])
+            self.assertEqual(context.conversation[1].applied, {"light": {"brightness": 35}})

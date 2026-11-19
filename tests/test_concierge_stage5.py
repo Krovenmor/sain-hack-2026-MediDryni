@@ -174,7 +174,7 @@ class ExtendedActionTests(unittest.TestCase):
         message = {"user_id": "user_1", "message_id": "ok", "role": "agent",
                    "at": "2026-11-20T01:00:00+07:00", "text": "Установил 18 °C."}
         self.context = replace(self.context, profile=replace(self.context.profile, chat_history=[message]))
-        setting = {"message_id": "ok", "device_id": "climate", "field_id": "temperature_c", "value": 18}
+        setting = {"message_id": "ok", "quote": "18 °C", "device_id": "climate", "field_id": "temperature_c", "value": 18}
         self.assertEqual(self._plan("like_yesterday", confirmed_settings=[setting]),
                          (DevicePatch("climate", {"temperature_c": 18}),))
         with self.assertRaisesRegex(ActionPlanError, "missing_history"):
