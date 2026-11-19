@@ -7,6 +7,7 @@ import httpx
 
 from ai_service.infra.llm_client import LlmClient
 from ai_service.service.agent import LlmAgent
+from ai_service.service.request_interpretation import request_messages
 from concierge_service.ports.ai import AiAgentError, DialogueMessage, Intent, ProfileContext, RequestContext
 
 
@@ -257,24 +258,22 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(AiAgentError, "^unresolved_reference$"):
             await self.make_agent(handle).interpret_request(item, timeout_s=1)
 
-    async def test_implicit_follow_up_receives_the_last_two_dialogue_messages(self):
-        item = request_context("А можно поменьше?")
-        old = DialogueMessage(role="user", at=AT, text="Закрой шторы")
-        recent = [
-            DialogueMessage(role="user", at=AT, text="Добавь яркости свету"),
-            DialogueMessage(role="agent", at=AT, text="Изменил яркость света."),
-        ]
-        item = replace(item, conversation=[old, *recent])
-
-        def handle(request):
-            payload = json.loads(json.loads(request.content)["messages"][1]["content"])
-            self.assertEqual(payload["conversation"], [message.model_dump() for message in recent])
-            return completion(
-                '{"record_id":"request_1","intent":"dimmer","slots":{"mode":"relative","amount":null}}'
-            )
-
-        result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
-        self.assertEqual(result.intent, "dimmer")
+    def test_implicit_follow_up_keeps_the_referenced_exchange_across_a_topic_change(self):
+        for original, reply, follow_up in (
+            ("Разбуди в 07:00", "Установил будильник.", "А теперь на четверть часа попозже"),
+            ("Включи шум дождя на 10 минут", "Включил звук.", "Пусть играет подольше"),
+            ("Добавь яркости свету", "Изменил яркость света.", "А можно поменьше света?"),
+        ):
+            with self.subTest(follow_up=follow_up):
+                history = [
+                    DialogueMessage(role="user", at=AT, text=original),
+                    DialogueMessage(role="agent", at=AT, text=reply),
+                    DialogueMessage(role="user", at=AT, text="Прикрой шторы"),
+                    DialogueMessage(role="agent", at=AT, text="Изменил положение штор."),
+                ]
+                item = replace(request_context(follow_up), conversation=history)
+                payload = json.loads(request_messages(item)[1]["content"])
+                self.assertEqual(payload["conversation"], [message.model_dump() for message in history])
 
     async def test_yesterday_keeps_matching_stay_note_ahead_of_later_notes(self):
         item = request_context("Сделай как вчера")

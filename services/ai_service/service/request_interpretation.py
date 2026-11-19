@@ -76,14 +76,7 @@ def request_messages(item: RequestContext) -> list[dict[str, str]]:
 def _reference_context(item: RequestContext, query: str) -> dict[str, object]:
     past = bool(_PAST.search(query))
     home = bool(_HOME.search(query))
-    if not (past or home or _FOLLOW_UP.search(query)):
-        recent = bounded_history(
-            [message.model_dump(mode="json") for message in item.conversation[-2:]],
-            budget=1000, max_items=2,
-        )
-        return {"conversation": recent} if recent else {}
-
-    user_id = item.profile.user["user_id"]
+    follow_up = _FOLLOW_UP.search(query)
     if _ALARM_REFERENCE.search(query):
         query += " будильник разбуди будить"
     day = _past_day(item, query) if past else None
@@ -94,9 +87,13 @@ def _reference_context(item: RequestContext, query: str) -> dict[str, object]:
 
     conversation = bounded_history(
         [message.model_dump(mode="json") for message in item.conversation],
-        budget=1000, max_items=4, query=query, recent=2,
+        budget=1000, max_items=len(item.conversation), query=query, recent=2,
         priority=priority if past or home else None,
     )
+    if not (past or home or follow_up):
+        return {"conversation": conversation} if conversation else {}
+
+    user_id = item.profile.user["user_id"]
     history = [
         row for row in item.profile.chat_history if row["user_id"] == user_id
     ]
