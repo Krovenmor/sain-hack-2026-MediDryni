@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import httpx
@@ -16,6 +17,9 @@ from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.ports.ai import AiAgent
 from concierge_service.service.run_case import RunCase
+from shared.telemetry import log_event
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,6 +43,12 @@ def build_container(settings: Settings, *, ai_agent: AiAgent | None = None) -> C
         ai_agent = LlmAgent(LlmClient(
             client, base_url=llm.base_url, api_key=llm.api_key, model=llm.model
         ))
+    if ai_agent is None:
+        log_event(
+            logger, "llm_not_configured", level=logging.WARNING,
+            detail="LLM_BASE_URL, LLM_API_KEY and LLM_MODEL are not set; using the mock AI, "
+            "every request will be refused",
+        )
     run_case = RunCase(
         hack_api,
         room_api=room_api,
