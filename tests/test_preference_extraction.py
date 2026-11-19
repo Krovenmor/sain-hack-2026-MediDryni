@@ -230,7 +230,7 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
                 {"user_id": "guest", "private-field": "private-value"} if len(requests) == 1 else hints()
             )
 
-        with self.assertLogs("ai_service.errors", level="DEBUG") as logs:
+        with self.assertLogs("ai_service.service.output_validation", level="DEBUG") as logs:
             result = await self.make_agent(handle).extract_preference_hints([profile()], timeout_s=1)
 
         self.assertEqual(result, [PreferenceHints.model_validate(hints())])

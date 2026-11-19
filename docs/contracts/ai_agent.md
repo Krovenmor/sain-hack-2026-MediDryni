@@ -1,6 +1,6 @@
 # Контракт AiAgent v1
 
-Асинхронный порт `AiAgent` определяет две операции — извлечение предпочтений и интерпретацию просьбы. Его типы принадлежат `concierge_service`, реализация находится в `ai_service`. [Python-протокол и DTO](../../services/concierge_service/ports/ai.py) · [Реализация](../../services/ai_service/service/agent.py)
+Асинхронный порт `AiAgent` определяет две операции — извлечение предпочтений и интерпретацию просьбы. Его типы принадлежат `concierge_service`, реализация находится в `ai_service`. [Python-протокол и DTO](../../src/concierge_service/ports/ai.py) · [Реализация](../../src/ai_service/service/agent.py)
 
 ## Входные данные
 
@@ -198,12 +198,12 @@ Pydantic запрещает лишние поля, неизвестные intent
 
 ## Локальная проверка ai_service
 
-Системные промпты хранятся в [`services/ai_service/prompts/`](../../services/ai_service/prompts/).
+Системные промпты хранятся в [`src/ai_service/prompts/`](../../src/ai_service/prompts/).
 Команды запускаются из корня проекта с `LLM_BASE_URL`, `LLM_API_KEY` и `LLM_MODEL` в окружении.
 
 ```sh
-PYTHONPATH=services python -m ai_service.cmd.check_proxy
-PYTHONPATH=services python -m ai_service.cmd.evaluate_dev --dataset-file docs/data/dataset.json
+PYTHONPATH=src python -m ai_service.cmd.check_proxy
+PYTHONPATH=src python -m ai_service.cmd.evaluate_dev --dataset-file docs/data/dataset.json
 ```
 
 `check_proxy` делает один пробный запрос к прокси. `evaluate_dev` по умолчанию
@@ -222,7 +222,7 @@ PYTHONPATH=services python -m ai_service.cmd.evaluate_dev --dataset-file docs/da
 Проверка DTO без сети из корня репозитория:
 
 ```sh
-PYTHONPATH=services python -m unittest discover -s tests -p 'test_ai_contract.py' -v
+PYTHONPATH=src python -m unittest discover -s tests -p 'test_ai_contract.py' -v
 ```
 
 Эти тесты проверяют формы ответов и соответствие списка намерений внешнему контракту.
