@@ -28,7 +28,7 @@ from concierge_service.ports.store import ConversationStore
 from concierge_service.service.diagnostics import catalog_failure, preference_details, setting_values
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.request_handler import RequestHandler
-from run_telemetry import log_context, log_event
+from shared.telemetry import log_context, log_event
 
 logger = logging.getLogger(__name__)
 _RUN_BUDGET_S = 45 * 60 - 5  # Reserve time to validate and serialize the response.

@@ -17,7 +17,6 @@ from concierge_service.ports.ai import (
     RequestInterpretation,
 )
 
-from ai_service.errors import InvalidModelOutput, validation_reason
 from ai_service.prompts import load_prompt
 from ai_service.service.context import (
     bounded_history,
@@ -27,7 +26,8 @@ from ai_service.service.context import (
     record_text,
     track_catalog,
 )
-from run_telemetry import log_event
+from ai_service.service.output_validation import InvalidModelOutput, validation_reason
+from shared.telemetry import log_event
 
 
 _SYSTEM_PROMPT = load_prompt("interpret_request.md")

@@ -24,7 +24,7 @@ from concierge_service.ports.room import RoomApi, RoomApiError
 from concierge_service.service.diagnostics import catalog_failure, interpretation_slots, setting_values
 from concierge_service.service.reply_composer import RequestOutcome, compose_replies
 from concierge_service.service.request_planning import plan_request
-from run_telemetry import log_event
+from shared.telemetry import log_event
 
 logger = logging.getLogger(__name__)
 _INTERPRETATION_TIMEOUT_S = 60.0

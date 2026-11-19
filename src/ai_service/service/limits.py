@@ -5,10 +5,10 @@ from typing import TypeVar
 
 from concierge_service.ports.ai import AiAgentError
 
-from ai_service.errors import InvalidModelOutput
 from ai_service.infra.llm_client import LlmClient, LlmClientError
 from ai_service.prompts import load_prompt
-from run_telemetry import log_event
+from ai_service.service.output_validation import InvalidModelOutput
+from shared.telemetry import log_event
 
 
 Result = TypeVar("Result")

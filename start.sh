@@ -3,6 +3,6 @@
 set -eu
 project_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 exec python -m uvicorn concierge_service.cmd.api.main:app \
-  --app-dir "$project_dir/services" \
+  --app-dir "$project_dir/src" \
   --no-access-log \
   --host 0.0.0.0 --port "${PORT:-8000}"

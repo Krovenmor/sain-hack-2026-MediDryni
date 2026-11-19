@@ -1,4 +1,4 @@
-"""Structured diagnostics shared by the run and its AI adapter."""
+"""Structured run diagnostics with task-local logging context."""
 
 import json
 import logging

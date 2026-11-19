@@ -18,4 +18,4 @@ run:
 	sh start.sh
 
 test:
-	PYTHONPATH=services PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v
+	PYTHONPATH=src PYTHONDONTWRITEBYTECODE=1 python -m unittest discover -s tests -v

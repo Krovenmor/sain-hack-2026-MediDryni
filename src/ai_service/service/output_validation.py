@@ -5,7 +5,7 @@ import logging
 from pydantic import ValidationError
 
 from concierge_service.ports.ai import AiAgentError
-from run_telemetry import log_event
+from shared.telemetry import log_event
 
 logger = logging.getLogger(__name__)
 _SCHEMA_FIELDS = frozenset({

@@ -33,7 +33,7 @@ from concierge_service.ports.ai import (
     SoundInterpretation,
 )
 from concierge_service.service.diagnostics import setting_values
-from run_telemetry import log_event
+from shared.telemetry import log_event
 
 logger = logging.getLogger(__name__)
 

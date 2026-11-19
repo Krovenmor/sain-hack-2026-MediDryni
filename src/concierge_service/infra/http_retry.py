@@ -5,7 +5,7 @@ import logging
 
 import httpx
 
-from run_telemetry import log_event
+from shared.telemetry import log_event
 
 logger = logging.getLogger(__name__)
 _TRANSIENT_STATUSES = {408, 500, 502, 503, 504}
