@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC
 from time import monotonic
 from uuid import uuid4
 
 from concierge_service.domain.answers import RequestAnswer, RunResult, StayAnswer
-from concierge_service.domain.dataset import DatasetIndex, build_dataset_index
+from concierge_service.domain.dataset import DatasetIndex, Request, User, build_dataset_index
 from concierge_service.domain.device_catalog import DeviceValueError
 from concierge_service.domain.sleep import ResolvedPreferences, SleepPlanError, SleepPlanner
 from concierge_service.ports.ai import (
@@ -28,7 +29,7 @@ from concierge_service.ports.store import ConversationStore
 from concierge_service.service.diagnostics import catalog_failure, preference_details, setting_values
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.request_handler import RequestHandler
-from shared.telemetry import log_context, log_event
+from shared.telemetry import error_details, log_context, log_event
 
 logger = logging.getLogger(__name__)
 _RUN_BUDGET_S = 45 * 60 - 5  # Reserve time to validate and serialize the response.
@@ -42,6 +43,12 @@ class UnsupportedCase(Exception):
 
 class RunDeadlineExceeded(Exception):
     """The run expired before the input dataset could be loaded."""
+
+
+@dataclass(frozen=True)
+class _GuestPreferences:
+    resolved: ResolvedPreferences
+    hints: PreferenceHints | None
 
 
 class RunCase:
@@ -75,7 +82,7 @@ class RunCase:
                 result = await self._run(dataset_code=dataset_code, token=token)
             except Exception as exc:
                 log_event(
-                    logger, "run_failed", level=logging.WARNING, error_type=type(exc).__name__,
+                    logger, "run_failed", level=logging.WARNING, **error_details(exc),
                     duration_ms=round((monotonic() - started) * 1000),
                 )
                 raise
@@ -130,12 +137,17 @@ class RunCase:
             logger, "preferences_finished", profiles=len(profiles), succeeded=len(hints_by_user),
             duration_ms=round((monotonic() - preference_started) * 1000),
         )
-        preferences_by_user = {
-            user_id: resolve_preferences(user, index.tracks_by_id, hints_by_user.get(user_id))
-            for user_id, user in index.users_by_id.items()
-        }
-        if logger.isEnabledFor(logging.DEBUG):
-            for profile_number, resolved in enumerate(preferences_by_user.values(), 1):
+        profile_numbers = {user_id: number for number, user_id in enumerate(profiles, 1)}
+        preferences_by_user = {}
+        for user_id, profile_number in profile_numbers.items():
+            guest = _resolve_guest_preferences(
+                profile_number, index.users_by_id[user_id], index, hints_by_user.get(user_id),
+            )
+            if guest is None:
+                continue
+            preferences_by_user[user_id] = guest
+            if logger.isEnabledFor(logging.DEBUG):
+                resolved = guest.resolved
                 log_event(
                     logger, "preference_resolved", level=logging.DEBUG, profile_number=profile_number,
                     bedtime=resolved.bedtime.isoformat(), has_home_timezone=resolved.home_timezone is not None,
@@ -145,10 +157,11 @@ class RunCase:
                         if "track_id" in setting_values({"track_id": track})
                     ],
                 )
-        profile_numbers = {user_id: number for number, user_id in enumerate(profiles, 1)}
         for stay in parsed.dataset.stays:
+            if stay.user_id not in preferences_by_user:
+                continue
             try:
-                preferences = preferences_by_user[stay.user_id]
+                preferences = preferences_by_user[stay.user_id].resolved
                 steps = self._sleep_planner.plan(stay, preferences, index.device_fields_by_device)
                 if logger.isEnabledFor(logging.DEBUG):
                     log_event(
@@ -171,11 +184,17 @@ class RunCase:
                 await self._room_api.load_scenario(
                     session_id=session.session_id, steps=steps, token=token
                 )
-            except (SleepPlanError, RoomApiError) as exc:
-                reason = "invalid_scenario" if isinstance(exc, SleepPlanError) else "simulator_error"
+            except Exception as exc:
+                # One failed stay must not cost the whole /run: skip it and keep going.
+                if isinstance(exc, SleepPlanError):
+                    reason = "invalid_scenario"
+                elif isinstance(exc, RoomApiError):
+                    reason = "simulator_error"
+                else:
+                    reason = "unexpected_error"
                 log_event(
                     logger, "stay_skipped", level=logging.WARNING,
-                    record_id=stay.record_id, reason=reason,
+                    record_id=stay.record_id, reason=reason, **error_details(exc),
                     http_status=exc.http_status if isinstance(exc, RoomApiError) else None,
                 )
                 if isinstance(exc.__cause__, DeviceValueError):
@@ -187,7 +206,7 @@ class RunCase:
             stays.append(StayAnswer(stay.record_id, str(session.session_id)))
             log_event(logger, "stay_finished", record_id=stay.record_id, steps=len(steps))
         await self._process_requests(
-            index, parsed.source, profiles, hints_by_user, preferences_by_user,
+            index, parsed.source, profiles, preferences_by_user,
             requests_by_user, token=token, deadline=deadline,
         )
 
@@ -210,6 +229,13 @@ class RunCase:
             return {}
         except TimeoutError:
             log_event(logger, "preferences_failed", level=logging.WARNING, reason="timeout")
+            return {}
+        except Exception as exc:
+            # Without hints the scenarios fall back to profiles and defaults.
+            log_event(
+                logger, "preferences_failed", level=logging.WARNING,
+                reason="unexpected_error", **error_details(exc),
+            )
             return {}
 
         if tuple(result.user_id for result in results) != tuple(profiles):
@@ -238,8 +264,7 @@ class RunCase:
         index: DatasetIndex,
         source: DatasetSource,
         profiles: dict[str, ProfileContext],
-        hints: dict[str, PreferenceHints],
-        preferences: dict[str, ResolvedPreferences],
+        preferences: dict[str, _GuestPreferences],
         requests_by_user: dict[str, list[RequestAnswer]],
         *,
         token: str,
@@ -251,37 +276,69 @@ class RunCase:
         async def process_user(user_id: str, profile_number: int) -> None:
             async with user_slots:
                 for request in index.requests_by_user[user_id]:
-                    context = RequestContext(
-                        profile=profiles[user_id],
-                        request=source.requests_by_id[request.record_id],
-                        stay=source.stays_by_id[request.stay_id],
-                        intents=source.intents,
-                        conversation=store.history(user_id),
-                        preference_hints=hints.get(user_id),
-                    )
-                    with log_context(record_id=request.record_id, profile_number=profile_number):
-                        answer = await self._request_handler.handle(
-                            request, context, index.device_fields_by_device,
-                            preferences=preferences[user_id], token=token, deadline=deadline,
+                    try:
+                        await process_request(user_id, profile_number, request)
+                    except Exception as exc:
+                        # The request handler answers its own errors; this guard keeps a bug
+                        # around it from cancelling the dialogues of the other guests.
+                        log_event(
+                            logger, "request_skipped", level=logging.WARNING,
+                            record_id=request.record_id, profile_number=profile_number, **error_details(exc),
                         )
-                    if answer is None:
-                        continue
-                    requests_by_user[user_id].append(answer)
-                    utterances = tuple(
-                        DialogueMessage(role="user", at=item.at.isoformat(), text=item.text)
-                        for item in request.utterances
-                    )
-                    replies = tuple(
-                        DialogueMessage(role=reply.role, at=reply.at, text=reply.text, applied=answer.applied or None)
-                        for reply in answer.replies
-                    )
-                    store.append(user_id, utterances + replies)
+
+        async def process_request(user_id: str, profile_number: int, request: Request) -> None:
+            context = RequestContext(
+                profile=profiles[user_id],
+                request=source.requests_by_id[request.record_id],
+                stay=source.stays_by_id[request.stay_id],
+                intents=source.intents,
+                conversation=store.history(user_id),
+                preference_hints=preferences[user_id].hints,
+            )
+            with log_context(record_id=request.record_id, profile_number=profile_number):
+                answer = await self._request_handler.handle(
+                    request, context, index.device_fields_by_device,
+                    preferences=preferences[user_id].resolved, token=token, deadline=deadline,
+                )
+            if answer is None:
+                return
+            requests_by_user[user_id].append(answer)
+            utterances = tuple(
+                DialogueMessage(role="user", at=item.at.isoformat(), text=item.text)
+                for item in request.utterances
+            )
+            replies = tuple(
+                DialogueMessage(role=reply.role, at=reply.at, text=reply.text, applied=answer.applied or None)
+                for reply in answer.replies
+            )
+            store.append(user_id, utterances + replies)
 
         async with asyncio.TaskGroup() as tasks:
             for profile_number, (user_id, requests) in enumerate(index.requests_by_user.items(), 1):
-                if requests:
+                if requests and user_id in preferences:
                     requests_by_user[user_id] = []
                     tasks.create_task(process_user(user_id, profile_number))
+
+
+def _resolve_guest_preferences(
+    profile_number: int, user: User, index: DatasetIndex, hints: PreferenceHints | None
+) -> _GuestPreferences | None:
+    if hints is not None:
+        try:
+            return _GuestPreferences(resolve_preferences(user, index.tracks_by_id, hints), hints)
+        except Exception as exc:
+            log_event(
+                logger, "preference_hints_ignored", level=logging.WARNING,
+                profile_number=profile_number, **error_details(exc),
+            )
+    try:
+        return _GuestPreferences(resolve_preferences(user, index.tracks_by_id), None)
+    except Exception as exc:
+        log_event(
+            logger, "profile_skipped", level=logging.WARNING,
+            profile_number=profile_number, **error_details(exc),
+        )
+        return None
 
 
 def _build_profiles(index: DatasetIndex, source: DatasetSource) -> dict[str, ProfileContext]:

@@ -24,7 +24,7 @@ from concierge_service.ports.room import RoomApi, RoomApiError
 from concierge_service.service.diagnostics import catalog_failure, interpretation_slots, setting_values
 from concierge_service.service.reply_composer import RequestOutcome, compose_replies
 from concierge_service.service.request_planning import plan_request
-from shared.telemetry import log_event
+from shared.telemetry import error_details, log_event
 
 logger = logging.getLogger(__name__)
 _INTERPRETATION_TIMEOUT_S = 60.0
@@ -62,26 +62,19 @@ class RequestHandler:
             return None
 
         try:
-            interpreted = await self._interpret(request, context, deadline)
-        except AiAgentError as exc:
-            ai_error = exc.code
-            outcome = "missing_history" if exc.code == "unresolved_reference" else "unrecognized"
-            replies = compose_replies(request, outcome)
-        except TimeoutError:
-            ai_error = "timeout"
-            outcome = "unrecognized"
-            replies = compose_replies(request, outcome)
-        else:
-            intent = interpreted.intent
-            if logger.isEnabledFor(logging.DEBUG):
-                log_event(
-                    logger, "request_interpreted", level=logging.DEBUG,
-                    intent=intent, slots=interpretation_slots(interpreted),
-                )
-            outcome = await self._execute(
-                request, interpreted, context, preferences, catalog, session.session_id, token, applied
+            intent, ai_error, outcome = await self._resolve(
+                request, context, preferences, catalog, session.session_id, token, deadline, applied
             )
-            replies = compose_replies(request, outcome, intent=interpreted.intent)
+            replies = compose_replies(request, outcome, intent=intent)
+        except Exception as exc:
+            # The online run has a single attempt: an unexpected bug must cost only this
+            # record, not the whole /run. The session already exists, so answer with a refusal.
+            outcome = "partial" if applied else "room_error"
+            replies = compose_replies(request, outcome)
+            log_event(
+                logger, "request_unexpected_error", level=logging.WARNING,
+                record_id=request.record_id, **error_details(exc),
+            )
 
         log_event(
             logger, "request_finished", record_id=request.record_id, intent=intent,
@@ -89,6 +82,36 @@ class RequestHandler:
             duration_ms=round((monotonic() - started) * 1000),
         )
         return RequestAnswer(request.record_id, str(session.session_id), replies, applied)
+
+    async def _resolve(
+        self,
+        request: Request,
+        context: RequestContext,
+        preferences: ResolvedPreferences,
+        catalog: DeviceFields,
+        session_id: UUID,
+        token: str,
+        deadline: float,
+        applied: dict[str, dict[str, JSONScalar]],
+    ) -> tuple[str | None, str | None, RequestOutcome]:
+        """Return the intent, the AI error code and the outcome of the request."""
+        try:
+            interpreted = await self._interpret(request, context, deadline)
+        except AiAgentError as exc:
+            outcome = "missing_history" if exc.code == "unresolved_reference" else "unrecognized"
+            return None, exc.code, outcome
+        except TimeoutError:
+            return None, "timeout", "unrecognized"
+
+        if logger.isEnabledFor(logging.DEBUG):
+            log_event(
+                logger, "request_interpreted", level=logging.DEBUG,
+                intent=interpreted.intent, slots=interpretation_slots(interpreted),
+            )
+        outcome = await self._execute(
+            request, interpreted, context, preferences, catalog, session_id, token, applied
+        )
+        return interpreted.intent, None, outcome
 
     async def _interpret(
         self, request: Request, context: RequestContext, deadline: float
