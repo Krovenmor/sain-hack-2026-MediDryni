@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from ai_service.service.agent import LlmAgent
+from ai_service.service.preferences import PreferenceInput
 from concierge_service.di.config import Settings
 from concierge_service.di.container import build_container
 from concierge_service.domain.action_planner import ActionPlanError, DevicePatch
@@ -71,6 +72,39 @@ class ExtendedActionTests(unittest.TestCase):
         return plan_request(
             self.request, interpretation(intent, **slots), self.context, PREFERENCES, catalog()
         )
+
+    def test_like_home_reconciles_saved_summaries_at_the_time_of_the_request(self):
+        old = {
+            "user_id": "user_1", "message_id": "old", "role": "agent",
+            "at": "2026-10-01T12:00:00+03:00", "text": "Записала домашние настройки: свет 50%.",
+        }
+        known = ObservedSetting(
+            context="home", device_id="light", field_id="brightness", value=50,
+            observed_at=old["at"], sources=[SourceRef(kind="message", source_id="old")],
+        )
+        devices = [{"device_id": "light", "fields": [{
+            "field_id": "brightness", "value_schema": {"type": "integer", "minimum": 0, "maximum": 100},
+        }]}]
+        # Keep both possible targets different from the initial brightness.
+        self.request = replace(self.request, initial_state={"light": {"brightness": 10}})
+        for new_at, expected in (
+            ("2026-10-28T12:00:00+03:00", 30),
+            ("2026-10-01T09:00:00+00:00", None),
+            ("2026-11-21T12:00:00+03:00", 50),
+        ):
+            with self.subTest(new_at=new_at):
+                update = old | {"message_id": "new", "at": new_at,
+                                "text": "Обновила домашние настройки: свет 30%."}
+                profile = replace(self.context.profile, devices=devices, chat_history=[old, update])
+                extracted = preference_hints("user_1").model_copy(update={"settings": [known]})
+                hints = PreferenceInput(profile, "user_1", profile_number=1).parse(extracted.model_dump_json())
+                self.assertEqual(len(hints.settings), 2)
+                self.context = replace(self.context, profile=profile, preference_hints=hints)
+                if expected is None:
+                    with self.assertRaisesRegex(ActionPlanError, "missing_history"):
+                        self._plan("like_home")
+                else:
+                    self.assertEqual(self._plan("like_home"), (DevicePatch("light", {"brightness": expected}),))
 
     def test_alarm_preserves_unspecified_mode_and_window(self):
         self.assertEqual(

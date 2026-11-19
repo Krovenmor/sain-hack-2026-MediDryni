@@ -1,10 +1,14 @@
 """Check field-level evidence in a direct confirmation or an adjacent request and receipt."""
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+from math import isfinite
 
-from concierge_service.ports.ai import JsonObject, ObservedSetting, Scalar
+from jsonschema import Draft202012Validator
+from pydantic import JsonValue
+
+from concierge_service.ports.ai import JsonObject, ObservedSetting, Scalar, SourceRef
 
 _RECEIPT = re.compile(r"(?:готово|сделано|выполнено|установлено|настроено)[.! ]*", re.I)
 _ACTION = re.compile(
@@ -134,3 +138,70 @@ class ConfirmationHistory:
         if request_id not in source_ids or request_id not in self.visible:
             return False
         return self.supports(source_id, request_id, str(self.visible[request_id]["text"]), *args)
+
+
+# Only a labelled list recorded by the agent is sufficiently unambiguous to fill
+# gaps in the timeline of language-model observations. Conversation and hotel notes stay with the model.
+_HOME_SUMMARY = re.compile(
+    r"(?:(?:записал[аи]?|запомнил[аи]?|обновил[аи]?|сохранил[аи]?)\s+)?"
+    r"домашние\s+(?:вечерние\s+)?настройки\s*:\s*(.+)", re.I,
+)
+_APPROX = r"(?:(?:около|примерно)\s+)?"
+_HOME_FIELDS = {
+    ("light", "brightness"): rf"(?:яркость(?: света)?|свет|ночник)\s+{_APPROX}{_NUMBER}\s*%",
+    ("light", "color_temperature_k"): rf"(?:(?:цветовая температура|т[её]плый свет|свет)\s+)?{_APPROX}{_NUMBER}\s*[kк]",
+    ("climate", "temperature_c"): rf"(?:(?:температура|климат)\s+)?{_APPROX}{_NUMBER}\s*°\s*[cс]",
+}
+
+
+def home_summary_settings(
+    messages: Sequence[JsonObject], known: Sequence[ObservedSetting],
+    fields: Mapping[tuple[str, str], JsonValue],
+) -> list[ObservedSetting]:
+    undated_fields = set()
+    recorded = set()
+    for setting in known:
+        if setting.context != "home":
+            continue
+        key = setting.device_id, setting.field_id
+        if setting.observed_at is None:
+            undated_fields.add(key)
+        else:
+            recorded.add((key, datetime.fromisoformat(setting.observed_at), setting.value))
+
+    validators = {}
+    for key, pattern in _HOME_FIELDS.items():
+        schema = fields.get(key)
+        if key in undated_fields or not isinstance(schema, dict) or schema.get("type") not in ("number", "integer"):
+            continue
+        if schema.keys() <= {"type", "minimum", "maximum"} and all(
+            type(schema[k]) in (int, float) for k in schema.keys() - {"type"}
+        ):
+            validators[key] = (pattern, Draft202012Validator(schema))
+    if not validators:
+        return []
+    additions = []
+    for row in messages:
+        if row.get("role") != "agent":
+            continue
+        match = _HOME_SUMMARY.fullmatch(str(row["text"]).strip().rstrip("."))
+        if not match or _UNCERTAIN.search(match[1].casefold()) or re.search(r"\b(?:или|либо)\b", match[1], re.I):
+            continue
+        for part in re.split(r";|(?<!\d),|,(?!\d)", match[1]):
+            for key, (pattern, validator) in validators.items():
+                value = re.fullmatch(pattern, part.strip(), re.I)
+                if value:
+                    number = float(value[1].replace(",", "."))
+                    if not isfinite(number) or not validator.is_valid(number):
+                        continue
+                    fact = (key, datetime.fromisoformat(row["at"]), number)
+                    if fact in recorded:
+                        continue
+                    recorded.add(fact)
+                    device, field = key
+                    additions.append(ObservedSetting(
+                        context="home", observed_at=row["at"], device_id=device, field_id=field,
+                        value=int(number) if number.is_integer() else number,
+                        sources=[SourceRef(kind="message", source_id=row["message_id"], pointer="/text")],
+                    ))
+    return additions

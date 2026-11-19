@@ -83,6 +83,26 @@ class PreferenceResolverTests(unittest.TestCase):
             resolve_preferences(self.user, {"track_1"}),
         )
 
+    def test_dated_bedtime_changes_use_the_latest_unambiguous_instant(self):
+        guest = replace(self.user, sleep_preferences=None)
+        base = preference_hints(guest.user_id, temperature="cool")
+        def reading(value, at, scope="bedtime"):
+            return ObservedSetting(context=scope, device_id="climate", field_id="temperature_c",
+                                   value=value, observed_at=at, sources=[source()])
+
+        old = reading(22, "2026-10-15T16:00:00+06:00")
+        new = reading(19.5, "2026-10-15T14:30:00+03:00")
+        for settings, expected in (
+            ([new, old], 19.5),
+            ([old, new, reading(21, "2026-10-16T12:00:00+03:00", "past_stay")], 19.5),
+            ([new, reading(22, "2026-10-15T11:30:00+00:00")], 17.5),
+            ([new, reading(22, None)], 17.5),
+        ):
+            with self.subTest(settings=settings):
+                hints = base.model_copy(update={"settings": settings})
+                self.assertEqual(resolve_preferences(guest, (), hints).night_temperature, expected)
+                self.assertEqual(resolve_preferences(self.user, (), hints).night_temperature, 17.5)
+
     def test_only_consistent_bedtime_temperatures_refine_the_model_category(self) -> None:
         guest = replace(self.user, sleep_preferences=None)
         hints = preference_hints(guest.user_id, temperature="cool")

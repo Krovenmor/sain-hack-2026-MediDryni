@@ -24,7 +24,7 @@ from ai_service.service.context import (
     preference_evidence,
     track_catalog,
 )
-from ai_service.service.history_evidence import ConfirmationHistory
+from ai_service.service.history_evidence import ConfirmationHistory, home_summary_settings
 from ai_service.service.output_validation import InvalidModelOutput, validation_reason
 from shared.telemetry import log_event
 
@@ -67,6 +67,11 @@ class PreferenceInput:
         self._item = item
         self._user_id = user_id
         self._profile_number = profile_number
+        self._fields = {
+            (device["device_id"], field["field_id"]): field.get("value_schema")
+            for device in self._item.devices
+            for field in cast(list[JsonObject], device["fields"])
+        }
         self._profile = {key: item.user[key] for key in _PROFILE_FIELDS if key in item.user}
         self._events = bounded_history(
             [event for event in item.events if event["user_id"] == user_id
@@ -115,9 +120,14 @@ class PreferenceInput:
                 ) for source_id in ids):
                     continue
             settings.append(setting)
-        if len(settings) != len(hints.settings):
-            log_event(logger, "history_observation_rejected", dropped=len(hints.settings) - len(settings))
-            return hints.model_copy(update={"settings": settings})
+        rejected = len(hints.settings) - len(settings)
+        if rejected:
+            log_event(logger, "history_observation_rejected", dropped=rejected)
+        additions = home_summary_settings(self._messages, settings, self._fields)
+        if additions:
+            log_event(logger, "home_summary_recovered", observations=len(additions))
+        if rejected or additions:
+            return hints.model_copy(update={"settings": settings + additions})
         return hints
 
     def validate(self, hints: PreferenceHints) -> None:
@@ -150,13 +160,8 @@ class PreferenceInput:
             except (ValueError, ZoneInfoNotFoundError):
                 raise InvalidModelOutput("preference_timezone") from None
 
-        fields = {
-            (device["device_id"], field["field_id"])
-            for device in self._item.devices
-            for field in cast(list[JsonObject], device["fields"])
-        }
         for setting in hints.settings:
-            if (setting.device_id, setting.field_id) not in fields:
+            if (setting.device_id, setting.field_id) not in self._fields:
                 raise InvalidModelOutput("preference_device_field")
             if isinstance(setting.value, float) and not isfinite(setting.value):
                 raise InvalidModelOutput("preference_nonfinite_value")

@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Collection
-from datetime import time
+from datetime import datetime, time
 from typing import TypeVar
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -58,15 +58,21 @@ T = TypeVar("T")
 
 
 def _bedtime_temperature_category(hints: PreferenceHints) -> str | None:
-    values = [
-        setting.value for setting in hints.settings
+    readings = [
+        setting for setting in hints.settings
         if setting.context == "bedtime" and setting.device_id == "climate"
         and setting.field_id == "temperature_c" and type(setting.value) in (int, float)
     ]
-    if values:
-        for category, midpoint in _TEMPERATURES.items():
-            if all(midpoint - 0.5 <= value <= midpoint + 0.5 for value in values):
-                return category
+    if not readings:
+        return None
+
+    if all(reading.observed_at is not None for reading in readings):
+        dated = [(datetime.fromisoformat(r.observed_at), r) for r in readings]
+        latest = max(at for at, _ in dated)
+        readings = [reading for at, reading in dated if at == latest]
+    for category, midpoint in _TEMPERATURES.items():
+        if all(midpoint - 0.5 <= reading.value <= midpoint + 0.5 for reading in readings):
+            return category
     return None
 
 

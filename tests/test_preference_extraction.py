@@ -140,6 +140,45 @@ class PreferenceExtractionTests(unittest.IsolatedAsyncioTestCase):
         result = await self.make_agent(handle).extract_preference_hints([item], timeout_s=1)
         self.assertEqual(result, [PreferenceHints.model_validate(payload)])
 
+    def test_saved_home_summary_fills_only_missing_catalog_fields(self):
+        item = profile()
+        fields = {
+            "climate": {"temperature_c": ("number", 16, 26)},
+            "light": {"brightness": ("integer", 0, 100), "color_temperature_k": ("integer", 2200, 6500)},
+        }
+        devices = [
+            {"device_id": device, "fields": [
+                {"field_id": name, "value_schema": {"type": kind, "minimum": low, "maximum": high}}
+                for name, (kind, low, high) in specs.items()
+            ]} for device, specs in fields.items()
+        ]
+        message = {"user_id": "guest", "role": "agent", "message_id": "saved",
+                   "at": "2026-10-01T14:00:00+03:00",
+                   "text": "Сохранила домашние настройки: яркость 45%, 3200 K, 20,5 °C."}
+        known = {"context": "home", "device_id": "light", "field_id": "brightness",
+                 "observed_at": None, "value": 60, "sources": [source()]}
+        def extract(row):
+            prepared = PreferenceInput(replace(item, devices=devices, chat_history=[row]),
+                                       "guest", profile_number=1)
+            return prepared.parse(json.dumps(hints(settings=[known]))).settings
+
+        settings = extract(message)
+        self.assertEqual({s.field_id: s.value for s in settings},
+                         {"brightness": 60, "color_temperature_k": 3200, "temperature_c": 20.5})
+        for s in settings[1:]:
+            self.assertEqual((s.context, s.observed_at, s.sources[0].source_id),
+                             ("home", message["at"], "saved"))
+        for row in (
+            message | {"user_id": "other"}, message | {"role": "user"},
+            message | {"text": "Не записала домашние настройки: 21 °C."},
+            message | {"text": "Домашние настройки: 21 °C или 19 °C."},
+            message | {"text": "Сохранила настройки номера: 21 °C."},
+            message | {"text": "Домашние настройки: если замёрзну, 22 °C."},
+            message | {"text": "Домашние настройки: 9500 K, 40 °C."},
+        ):
+            with self.subTest(row=row):
+                self.assertEqual(len(extract(row)), 1)
+
     def test_short_chat_keeps_the_guests_own_messages_in_order(self):
         first = {"user_id": "guest", "message_id": "first", "text": "Доброе утро."}
         second = {"user_id": "guest", "message_id": "second", "text": "От резкого звонка вскакиваю."}
