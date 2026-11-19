@@ -24,7 +24,7 @@ from concierge_service.ports.room import RoomApi, RoomApiError
 from concierge_service.service.diagnostics import catalog_failure, interpretation_slots, setting_values
 from concierge_service.service.reply_composer import RequestOutcome, compose_replies
 from concierge_service.service.request_planning import plan_request
-from shared.telemetry import log_event
+from shared.telemetry import error_details, log_event
 
 logger = logging.getLogger(__name__)
 _INTERPRETATION_TIMEOUT_S = 60.0
@@ -73,7 +73,7 @@ class RequestHandler:
             replies = compose_replies(request, outcome)
             log_event(
                 logger, "request_unexpected_error", level=logging.WARNING,
-                record_id=request.record_id, error_type=type(exc).__name__,
+                record_id=request.record_id, **error_details(exc),
             )
 
         log_event(

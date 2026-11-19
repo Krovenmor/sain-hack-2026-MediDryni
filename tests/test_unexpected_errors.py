@@ -1,5 +1,6 @@
 """An unexpected bug must cost one record, not the whole /run."""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -59,7 +60,7 @@ class UnexpectedErrorTests(unittest.IsolatedAsyncioTestCase):
 
         async def broken_interpret(context, *, timeout_s):
             if context.request["record_id"] == "request_1":
-                raise RuntimeError("bug")
+                raise RuntimeError("sensitive exception message")
             return await interpret(context, timeout_s=timeout_s)
 
         app = create_app(self.run_case)
@@ -82,8 +83,13 @@ class UnexpectedErrorTests(unittest.IsolatedAsyncioTestCase):
         broken = answers["request_1"]
         self.assertEqual(broken["session_id"], str(SESSION_ID))
         self.assertEqual([reply["response_class"] for reply in broken["replies"]], ["refused"])
-        self.assertIn("request_unexpected_error", "\n".join(logs.output))
-        self.assertIn("RuntimeError", "\n".join(logs.output))
+        event, = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(event["event"], "request_unexpected_error")
+        self.assertEqual(event["error_type"], "RuntimeError")
+        self.assertEqual(event["error_module"], __name__)
+        self.assertEqual(event["error_function"], "broken_interpret")
+        self.assertGreater(event["error_line"], 0)
+        self.assertNotIn("sensitive exception message", logs.output[0])
 
     async def test_bug_around_handler_keeps_other_guests_dialogues(self):
         handle = self.run_case._request_handler.handle
@@ -100,7 +106,9 @@ class UnexpectedErrorTests(unittest.IsolatedAsyncioTestCase):
             result = await self.run_case_once()
 
         self.assertEqual([answer.record_id for answer in result.requests], ["request_2"])
-        self.assertIn("request_skipped", "\n".join(logs.output))
+        event, = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual(event["event"], "request_skipped")
+        self.assertEqual(event["error_function"], "broken_handle")
 
     async def test_planner_bug_skips_only_that_stay(self):
         plan = SleepPlanner.plan
@@ -138,18 +146,54 @@ class UnexpectedErrorTests(unittest.IsolatedAsyncioTestCase):
         resolve = run_case_module.resolve_preferences
 
         def broken_resolve(user, track_ids, hints=None):
-            if hints is not None:
+            if user.user_id == "user_1" and hints is not None:
                 raise ValueError("bad hint")
             return resolve(user, track_ids, hints)
 
         with (
             patch.object(run_case_module, "resolve_preferences", side_effect=broken_resolve),
+            patch.object(self.agent, "interpret_request", wraps=self.agent.interpret_request) as interpret,
             self.assertLogs("concierge_service.service.run_case", level="WARNING") as logs,
         ):
             result = await self.run_case_once()
 
         self.assertEqual([stay.record_id for stay in result.stays], ["stay_1", "stay_2"])
         self.assertIn("preference_hints_ignored", "\n".join(logs.output))
+        contexts = {call.args[0].request["record_id"]: call.args[0] for call in interpret.await_args_list}
+        self.assertIsNone(contexts["request_1"].preference_hints)
+        self.assertEqual(contexts["request_2"].preference_hints.user_id, "user_2")
+
+    async def test_unusable_profile_skips_only_its_guest(self):
+        resolve = run_case_module.resolve_preferences
+
+        def broken_resolve(user, track_ids, hints=None):
+            if user.user_id == "user_1":
+                raise ValueError("unusable profile")
+            return resolve(user, track_ids, hints)
+
+        app = create_app(self.run_case)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            with (
+                patch.object(run_case_module, "resolve_preferences", side_effect=broken_resolve),
+                self.assertLogs("concierge_service.service.run_case", level="WARNING") as logs,
+            ):
+                response = await client.post(
+                    "/run", json={"case": 2}, headers={"Authorization": "Bearer test"},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual([stay["record_id"] for stay in body["stays"]], ["stay_2"])
+        self.assertEqual([request["record_id"] for request in body["requests"]], ["request_2"])
+        self.assertEqual(
+            [call.kwargs["record_id"] for call in self.room.create_session.await_args_list],
+            ["stay_2", "request_2"],
+        )
+        events = [json.loads(record.getMessage()) for record in logs.records]
+        self.assertEqual([event["event"] for event in events], ["preference_hints_ignored", "profile_skipped"])
+        self.assertTrue(all(event["profile_number"] == 1 for event in events))
 
 
 class MissingLlmSettingsTests(unittest.IsolatedAsyncioTestCase):
