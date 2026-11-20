@@ -85,7 +85,7 @@ h1, h2, h3, p { margin: 0; font-weight: 400; }
   100% { translate: .2rem -1.25rem; }
 }
 
-.topbar, .room-heading, .plan-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.topbar, .room-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .topbar { min-height: 4.5rem; margin-inline: -.2rem; }
 .menu-button { display: grid; place-items: center; padding: 0; min-width: 2.75rem; min-height: 2.75rem; }
 .menu-button img { display: block; }
@@ -151,7 +151,7 @@ h1 { font-size: clamp(1.8rem, 8.74vw, 2.25rem); line-height: 1.28; text-shadow: 
 .period:not(.expanded) .period-content { position: absolute; inset: 0; pointer-events: none; }
 .period-content h3 { font-size: 2.25rem; font-weight: bold; line-height: 1.28; }
 .card-rule { display: block; width: calc(100% - .45rem); height: 1px; margin: .65rem 0 1rem; }
-.settings, .plan ul {
+.settings {
   font-family: "Montserrat", sans-serif;
   font-size: 1rem;
   line-height: 1.55;
@@ -180,15 +180,11 @@ dialog::backdrop { background: rgb(15 1 6 / 60%); }
 .drawer[open] { animation: open-drawer 220ms var(--ease); }
 @keyframes open-drawer { from { transform: translateX(-100%); } }
 .close-menu { position: absolute; top: .9rem; right: 1.25rem; }
-.drawer h2, .plan h2 { font-size: 2rem; }
-.drawer h2 { padding-bottom: .25rem; border-bottom: 1px solid; }
+.drawer h2 { font-size: 2rem; padding-bottom: .25rem; border-bottom: 1px solid; }
 .drawer nav { display: grid; gap: 1.2rem; margin-top: 2.5rem; }
 .drawer nav button { text-align: left; text-transform: uppercase; border-radius: 1rem; font-size: 1.35rem; padding: .3rem .6rem; }
-.drawer .current { background: rgb(255 255 255 / 20%); }
+.drawer [aria-current="page"] { background: rgb(255 255 255 / 20%); }
 .drawer nav button:disabled { opacity: .65; }
-.plan { width: min(92vw, 25rem); max-height: 88svh; padding: 1.5rem; border-radius: 1.25rem; }
-.close-plan { font: 1.75rem/1 sans-serif; min-width: 2.75rem; min-height: 2.75rem; }
-.plan h3 { font-size: 1.65rem; margin: 1.2rem 0 .35rem; }
 @media (max-width: 360px) {
   .room-heading { flex-wrap: wrap; }
   .period-content { padding-left: .6rem; }

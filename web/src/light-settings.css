@@ -18,6 +18,7 @@
   pointer-events: none;
   animation: light-breathe 9s ease-in-out infinite alternate;
 }
+.home-screen .light-beam { visibility: hidden; width: 0; }
 .light-color {
   position: absolute;
   /* The SVG includes 128 extra units above the original 398-unit frame for the blur. */

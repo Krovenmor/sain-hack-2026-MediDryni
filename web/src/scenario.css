@@ -1,0 +1,113 @@
+.scenario-screen {
+  --scenario-title-size: clamp(1.875rem, 9.7vw, 2.5rem);
+  --scenario-tab-size: clamp(1.125rem, 5.825vw, 1.5rem);
+  overflow: hidden;
+  padding-bottom: 4.75rem;
+}
+.scenario-screen .light-beam {
+  /* Position the shared beam below the scenario title, tabs and light heading. */
+  top: calc(11.1875rem + 1.45 * var(--scenario-title-size) + 1.1 * var(--scenario-tab-size));
+}
+.scenario { margin-top: 1.6875rem; }
+.scenario h1 {
+  text-align: center;
+  font: 400 var(--scenario-title-size)/1.45 "Train One", sans-serif;
+  letter-spacing: -.2em;
+  text-shadow: 0 0 10px white;
+}
+.scenario-tabs-rule {
+  display: block;
+  margin: .3125rem 0 .1875rem;
+  max-width: calc(100% + .1875rem);
+}
+.scenario-periods {
+  display: flex;
+  justify-content: space-between;
+  gap: .125rem;
+  min-inline-size: 0;
+  border: 0;
+  margin: 0 -.1875rem;
+  padding: 0;
+}
+.scenario-periods label { cursor: pointer; }
+.scenario-periods span {
+  display: block;
+  border-radius: 2rem;
+  padding-inline: clamp(.375rem, 2.4vw, .625rem);
+  font-size: var(--scenario-tab-size);
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.scenario-periods input:checked + span { background: rgb(255 255 255 / 20%); }
+.scenario-periods input:focus-visible + span { outline: 2px solid #fad28e; outline-offset: 2px; }
+
+.scenario-details { margin-top: 1.9375rem; }
+.scenario-light { text-align: center; }
+.scenario-light h2, .scenario-wakeup h2 { font-size: 2rem; line-height: 1.18; }
+.scenario-light h2, .scenario-metrics { padding-left: .75rem; }
+.scenario-light h2, .scenario-climate h2, .scenario-dnd { text-transform: uppercase; }
+.scenario-metrics {
+  display: grid;
+  justify-items: center;
+  gap: 1.3125rem;
+  margin: 2.25rem 0 0;
+}
+.scenario-metric {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+}
+.scenario-metric dt { font: 400 .75rem/1.25 "Montserrat", sans-serif; }
+.scenario-metric dd { margin: 0; line-height: 1.08; }
+.scenario-metric dd, .scenario-temperature, .scenario-wakeup time { -webkit-text-stroke: .5px; }
+.scenario-metric.kelvin dd { font-size: 4rem; }
+.scenario-metric.brightness dd { font-size: 3rem; }
+.scenario-metric.curtains dd { font-size: 2.25rem; }
+.scenario-metric.kelvin, .scenario-metric.brightness { color: var(--wine); }
+
+.scenario-climate {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  justify-items: start;
+  align-items: end;
+  margin: 3.375rem 0 0 .1875rem;
+}
+.scenario-climate-rays {
+  position: absolute;
+  z-index: -1;
+  top: -4rem;
+  left: calc(-1 * clamp(1rem, 5.83vw, 1.5rem) - .6875rem);
+  mix-blend-mode: lighten;
+  pointer-events: none;
+}
+.scenario-climate h2 { grid-column: 1 / -1; font-size: 1.5rem; }
+.scenario-temperature {
+  font-size: clamp(2.75rem, 15.53vw, 4rem);
+  line-height: 1.18;
+}
+.scenario-climate-rule {
+  position: absolute;
+  left: calc(50% + .34375rem);
+  top: 1.5625rem;
+  transform: rotate(90deg);
+  transform-origin: 0 0;
+}
+.scenario-dnd {
+  padding: 0 0 .4375rem 1.0625rem;
+  font-size: clamp(1.15rem, 5.825vw, 1.5rem);
+  line-height: 1.15;
+}
+.scenario-dnd small { display: block; font-size: .875rem; }
+.scenario-wakeup {
+  margin: 3.4375rem 0 0;
+  padding-left: 1.3125rem;
+  text-align: center;
+}
+.scenario-wakeup time {
+  display: block;
+  margin: .6875rem 0 .4375rem;
+  font-size: 4rem;
+  line-height: 1.2;
+}
+.scenario-wakeup p { font-size: 1.5rem; }

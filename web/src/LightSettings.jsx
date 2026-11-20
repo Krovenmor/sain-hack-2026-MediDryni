@@ -1,29 +1,13 @@
 import { useState } from "react";
-import warm from "../assets/light-warm.svg";
-import neutral from "../assets/light-neutral.svg";
-import cold from "../assets/light-cold.svg";
 import send from "../assets/send.svg";
 import microphone from "../assets/microphone.svg";
-import "./light-settings.css";
-
-const lightModes = [
-  { id: "warm", name: "Тёплый", image: warm, swatch: "#f0ad65" },
-  { id: "neutral", name: "Нейтральный", image: neutral, swatch: "#fff2da" },
-  { id: "cold", name: "Холодный", image: cold, swatch: "#b8e8ff" },
-];
+import { lightModes } from "./LightBeam.jsx";
 
 export function LightSettings({ mode, onModeChange }) {
   const [showModes, setShowModes] = useState(true);
 
   return (
     <section className="light-settings" aria-labelledby="light-title">
-      <div className="light-beam" aria-hidden="true">
-        {lightModes.map(({ id, image }) => (
-          <img key={id} className="light-color" src={image} alt="" data-active={mode === id} />
-        ))}
-        <div className="light-air" />
-        <div className="light-grain" />
-      </div>
       <h1 id="light-title" className="light-title">Ваши<br />пожелания?</h1>
       <div className="light-controls">
         <div className="light-mode-row">
