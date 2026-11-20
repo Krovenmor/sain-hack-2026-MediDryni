@@ -1,62 +1,3 @@
-@font-face {
-  font-family: "Poiret One";
-  src: url("assets/poiret-one-latin.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
-  font-family: "Poiret One";
-  src: url("assets/poiret-one-cyrillic.woff2") format("woff2");
-  font-display: swap;
-  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-@font-face {
-  font-family: "Train One";
-  src: url("assets/train-one-latin.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
-  font-family: "Train One";
-  src: url("assets/train-one-cyrillic.woff2") format("woff2");
-  font-display: swap;
-  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-@font-face {
-  font-family: "Montserrat";
-  src: url("assets/montserrat-latin.woff2") format("woff2");
-  font-display: swap;
-}
-@font-face {
-  font-family: "Montserrat";
-  src: url("assets/montserrat-cyrillic.woff2") format("woff2");
-  font-display: swap;
-  unicode-range: U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
-}
-
-:root {
-  --wine: #20020b;
-  --screen: 25.75rem;
-  --glow: 0 0 10px rgb(255 255 255 / 72%);
-  --ease: cubic-bezier(.22,.75,.25,1);
-  font-family: "Poiret One", sans-serif;
-  color: white;
-  background: var(--wine);
-  color-scheme: dark;
-}
-* { box-sizing: border-box; }
-body { margin: 0; }
-button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
-button:disabled { cursor: default; }
-button:focus-visible { outline: 2px solid #fad28e; outline-offset: -3px; }
-h1, h2, h3, p { margin: 0; font-weight: 400; }
-
-.welcome {
-  position: relative;
-  isolation: isolate;
-  max-width: var(--screen);
-  min-height: 100svh;
-  margin: auto;
-  padding: 0 clamp(1rem, 5.83vw, 1.5rem) 4.375rem;
-}
 .sky { position: absolute; z-index: -1; inset: 0; overflow: hidden; pointer-events: none; }
 .orb { position: absolute; height: auto; }
 .orb-four {
@@ -85,14 +26,7 @@ h1, h2, h3, p { margin: 0; font-weight: 400; }
   100% { translate: .2rem -1.25rem; }
 }
 
-.topbar, .room-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
-.topbar { min-height: 4.5rem; margin-inline: -.2rem; }
-.menu-button { display: grid; place-items: center; padding: 0; min-width: 2.75rem; min-height: 2.75rem; }
-.menu-button img { display: block; }
-.hotel { text-align: right; font-size: 1.25rem; line-height: 1.15; text-shadow: var(--glow); }
 .arrival { padding-top: clamp(1.65rem, 4.58svh, 2.625rem); }
-h1 { font-size: clamp(1.8rem, 8.74vw, 2.25rem); line-height: 1.28; text-shadow: var(--glow); animation: greet 220ms ease-out both; }
-@keyframes greet { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .guest, .check-in time {
   display: block;
   font: 400 clamp(2.25rem, 11.65vw, 3rem)/1.4 "Train One", sans-serif;
@@ -113,7 +47,6 @@ h1 { font-size: clamp(1.8rem, 8.74vw, 2.25rem); line-height: 1.28; text-shadow: 
 .room { margin-top: clamp(2.25rem, 6.8svh, 3.9rem); }
 .room-heading { align-items: end; margin-bottom: .8rem; }
 .room-heading h2 { font-size: clamp(1.85rem, 9.7vw, 2.5rem); line-height: 1.28; text-shadow: var(--glow); }
-.pill { border-radius: 2rem; font-weight: bold; line-height: 1.15; padding: .375rem .65rem; color: var(--wine); background: white; }
 .room-heading .pill { min-height: 2.125rem; padding-inline: .85rem; white-space: nowrap; }
 .pill.dark { color: white; background: var(--wine); border: 1px solid #100005; text-shadow: var(--glow); }
 .periods {
@@ -164,32 +97,8 @@ h1 { font-size: clamp(1.8rem, 8.74vw, 2.25rem); line-height: 1.28; text-shadow: 
 .period-actions .pill { min-height: 1.95rem; }
 .period-actions .dark { min-height: 2.125rem; }
 
-dialog { background: var(--wine); color: white; border: 1px solid rgb(255 255 255 / 45%); }
-dialog::backdrop { background: rgb(15 1 6 / 60%); }
-.drawer {
-  position: fixed;
-  inset: 0 auto 0 max(0px, calc((100vw - var(--screen)) / 2));
-  margin: 0;
-  padding: 2rem 1.375rem;
-  width: min(77vw, 19.8125rem);
-  max-width: none;
-  height: 100dvh;
-  max-height: none;
-  border: 0;
-}
-.drawer[open] { animation: open-drawer 220ms var(--ease); }
-@keyframes open-drawer { from { transform: translateX(-100%); } }
-.close-menu { position: absolute; top: .9rem; right: 1.25rem; }
-.drawer h2 { font-size: 2rem; padding-bottom: .25rem; border-bottom: 1px solid; }
-.drawer nav { display: grid; gap: 1.2rem; margin-top: 2.5rem; }
-.drawer nav button { text-align: left; text-transform: uppercase; border-radius: 1rem; font-size: 1.35rem; padding: .3rem .6rem; }
-.drawer [aria-current="page"] { background: rgb(255 255 255 / 20%); }
-.drawer nav button:disabled { opacity: .65; }
 @media (max-width: 360px) {
   .room-heading { flex-wrap: wrap; }
   .period-content { padding-left: .6rem; }
   .settings { font-size: .92rem; }
-}
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation: none !important; transition: none !important; }
 }

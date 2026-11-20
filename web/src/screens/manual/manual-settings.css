@@ -44,7 +44,7 @@
 .manual-switch:active img { scale: .94; }
 
 .manual-slider {
-  --track: url("../assets/manual-slider-line.svg");
+  --track: url("../../../assets/manual-slider-line.svg");
   --track-position: center 16px;
   --track-size: auto;
   --range-height: 2rem;
@@ -88,14 +88,14 @@
   width: 15px;
   height: var(--range-height);
   border: 0;
-  background: url("../assets/manual-slider-thumb.svg") center var(--thumb-offset) no-repeat;
+  background: url("../../../assets/manual-slider-thumb.svg") center var(--thumb-offset) no-repeat;
 }
 .manual-slider input::-moz-range-thumb {
   width: 15px;
   height: var(--range-height);
   border: 0;
   border-radius: 0;
-  background: url("../assets/manual-slider-thumb.svg") center var(--thumb-offset) no-repeat;
+  background: url("../../../assets/manual-slider-thumb.svg") center var(--thumb-offset) no-repeat;
 }
 
 .manual-dnd { display: grid; align-content: space-between; padding: .875rem .625rem .5rem; }

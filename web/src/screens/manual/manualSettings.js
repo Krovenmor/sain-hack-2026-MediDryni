@@ -6,11 +6,11 @@ export const tracks = [
 
 export function initialManualSettings(stay) {
   const [hour, minute] = stay.wakeUp.time.split(":").map(Number);
-  return stay.periods.map((period, index) => ({
+  return stay.periods.map(period => ({
     kelvin: period.light.kelvin,
     brightness: period.light.brightness,
     lightOn: period.light.brightness > 0,
-    climate: index === 0 ? 16 : period.temperature,
+    climate: period.temperature,
     curtains: period.curtains,
     doNotDisturb: period.doNotDisturb,
     alarmOn: true,

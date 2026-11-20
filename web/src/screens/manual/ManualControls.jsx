@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import climateColor from "../assets/manual-climate-color.png";
-import climateMask from "../assets/manual-climate-mask.svg";
-import switchArt from "../assets/manual-switch.svg";
+import climateColor from "../../../assets/manual-climate-color.png";
+import climateMask from "../../../assets/manual-climate-mask.svg";
+import switchArt from "../../../assets/manual-switch.svg";
 
 export function ManualSwitch({ label, checked, onChange, disabled }) {
   return (

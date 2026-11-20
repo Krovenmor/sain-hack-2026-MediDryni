@@ -1,4 +1,5 @@
-import tabsRule from "../assets/scenario-tabs-rule.svg";
+import "./period-tabs.css";
+import tabsRule from "../../assets/scenario-tabs-rule.svg";
 
 export function PeriodTabs({ periods, selected, onSelect, name }) {
   return (

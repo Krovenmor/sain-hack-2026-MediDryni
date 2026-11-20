@@ -1,6 +1,6 @@
-import climateRays from "../assets/scenario-climate-rays.png";
-import climateRule from "../assets/scenario-climate-rule.svg";
-import { PeriodTabs } from "./PeriodTabs.jsx";
+import climateRays from "../../../assets/scenario-climate-rays.png";
+import climateRule from "../../../assets/scenario-climate-rule.svg";
+import { PeriodTabs } from "../../components/PeriodTabs.jsx";
 import "./scenario.css";
 
 export function Scenario({ periods, selected, onSelect, wakeUp }) {

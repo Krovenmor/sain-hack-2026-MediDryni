@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import arrow from "../assets/manual-track-arrow.svg";
+import arrow from "../../../assets/manual-track-arrow.svg";
 import { ClimateDial, ManualSlider, ManualSwitch, TimeWheel } from "./ManualControls.jsx";
-import { PeriodTabs } from "./PeriodTabs.jsx";
+import { PeriodTabs } from "../../components/PeriodTabs.jsx";
 import { tracks } from "./manualSettings.js";
 import "./manual-settings.css";
 

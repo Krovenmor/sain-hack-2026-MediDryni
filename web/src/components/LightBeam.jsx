@@ -1,7 +1,7 @@
-import warm from "../assets/light-warm.svg";
-import neutral from "../assets/light-neutral.svg";
-import cold from "../assets/light-cold.svg";
-import "./light-settings.css";
+import warm from "../../assets/light-warm.svg";
+import neutral from "../../assets/light-neutral.svg";
+import cold from "../../assets/light-cold.svg";
+import "./light-beam.css";
 
 export const lightModes = [
   { id: "warm", name: "Тёплый", image: warm, swatch: "#f0ad65" },

@@ -1,0 +1,58 @@
+.light-beam {
+  position: absolute;
+  z-index: -1;
+  isolation: isolate;
+  top: 5.375rem;
+  left: 50%;
+  width: 129.37%;
+  aspect-ratio: 533 / 398;
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: light-breathe 9s ease-in-out infinite alternate;
+}
+.home-screen .light-beam { visibility: hidden; width: 0; }
+.light-color {
+  position: absolute;
+  /* The SVG includes 128 extra units above the original 398-unit frame for the blur. */
+  inset: calc(-128 / 398 * 100%) 0 auto;
+  display: block;
+  width: 100%;
+  height: auto;
+  opacity: 0;
+  mix-blend-mode: plus-lighter;
+  transition: opacity 540ms ease-in-out;
+}
+.light-color[data-active="true"] { opacity: 1; }
+@keyframes light-breathe {
+  from { opacity: 1; }
+  to { opacity: .94; }
+}
+.light-air, .light-grain { position: absolute; inset: 0; }
+.light-air {
+  background: radial-gradient(ellipse 26% 24% at 50% 27%, rgb(255 249 236 / 32%), transparent);
+  mix-blend-mode: soft-light;
+  animation: light-scatter 5.4s ease-in-out infinite alternate;
+}
+@keyframes light-scatter {
+  from { transform: translate(-12%, -4%) scale(.9); }
+  to { transform: translate(13%, 9%) scale(1.12); }
+}
+.light-grain {
+  background: url("../../assets/light-grain.png") 0 0 / 8rem repeat;
+  mask-image:
+    radial-gradient(ellipse 48% 47% at 50% 40%, #000 28%, transparent 100%),
+    linear-gradient(to bottom, transparent, #000 2.75rem);
+  mask-composite: intersect;
+  mix-blend-mode: soft-light;
+  opacity: .12;
+  animation: light-noise 1200ms steps(1, end) infinite;
+}
+@keyframes light-noise {
+  12.5% { background-position: 31px -19px; }
+  25%   { background-position: -13px 42px; }
+  37.5% { background-position: 52px 11px; }
+  50%   { background-position: -39px -24px; }
+  62.5% { background-position: 19px 37px; }
+  75%   { background-position: -51px 13px; }
+  87.5% { background-position: 24px -43px; }
+}
