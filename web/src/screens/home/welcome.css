@@ -5,7 +5,7 @@
   left: 52.88%;
   top: 2.68rem;
   rotate: -95.81deg;
-  animation: float-four 16s ease-in-out infinite alternate;
+  animation: float-four 13s ease-in-out infinite alternate;
 }
 .orb-five {
   width: 204.85%;
@@ -13,17 +13,17 @@
   top: 25.5rem;
   rotate: 24.59deg;
   opacity: .5;
-  animation: float-five 21s ease-in-out infinite alternate;
+  animation: float-five 17s ease-in-out infinite alternate;
 }
 @keyframes float-four {
   0% { translate: 0 0; }
-  54% { translate: -.5rem .85rem; }
-  100% { translate: .45rem 1.4rem; }
+  54% { translate: -.7rem 1.05rem; }
+  100% { translate: .6rem 1.75rem; }
 }
 @keyframes float-five {
   0% { translate: 0 0; }
-  46% { translate: .65rem -.35rem; }
-  100% { translate: .2rem -1.25rem; }
+  46% { translate: .85rem -.45rem; }
+  100% { translate: .3rem -1.6rem; }
 }
 
 .arrival { padding-top: clamp(1.65rem, 4.58svh, 2.625rem); }
