@@ -15,6 +15,8 @@ export function useChatLineFade(log, turns, showPhrases) {
       for (const block of blocks) {
         const rect = block.getBoundingClientRect();
         if (rect.bottom <= top || rect.top >= bottom) continue;
+        const maskTarget = block.closest(".guest-message") ?? block;
+        const textOffset = maskTarget === block ? 0 : rect.top - maskTarget.getBoundingClientRect().top;
         const lineHeight = parseFloat(getComputedStyle(block).lineHeight);
         const first = Math.max(0, Math.floor((top - rect.top) / lineHeight));
         const end = Math.min(Math.ceil(rect.height / lineHeight), Math.ceil((bottom - rect.top) / lineHeight));
@@ -22,10 +24,11 @@ export function useChatLineFade(log, turns, showPhrases) {
         for (let line = first; line < end; line++) {
           const center = rect.top + (line + 0.5) * lineHeight;
           const depth = Math.max(0, Math.min(1, (center - top) / (height * 0.8)));
-          const alpha = 0.1 + 0.9 * depth;
-          stops.push(`rgb(0 0 0 / ${alpha.toFixed(3)}) ${line * lineHeight}px ${(line + 1) * lineHeight}px`);
+          const alpha = 0.07 + 0.93 * depth;
+          const start = textOffset + line * lineHeight;
+          stops.push(`rgb(0 0 0 / ${alpha.toFixed(3)}) ${start}px ${start + lineHeight}px`);
         }
-        block.style.maskImage = stops.length ? `linear-gradient(to bottom, ${stops.join(", ")})` : "";
+        maskTarget.style.maskImage = stops.length ? `linear-gradient(to bottom, ${stops.join(", ")})` : "";
       }
     }
 
