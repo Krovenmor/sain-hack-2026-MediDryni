@@ -1,6 +1,6 @@
 import climateRays from "../assets/scenario-climate-rays.png";
 import climateRule from "../assets/scenario-climate-rule.svg";
-import tabsRule from "../assets/scenario-tabs-rule.svg";
+import { PeriodTabs } from "./PeriodTabs.jsx";
 import "./scenario.css";
 
 export function Scenario({ periods, selected, onSelect, wakeUp }) {
@@ -10,17 +10,7 @@ export function Scenario({ periods, selected, onSelect, wakeUp }) {
   return (
     <section className="scenario" aria-labelledby="scenario-title">
       <h1 id="scenario-title">Сценарий</h1>
-      <img className="scenario-tabs-rule" src={tabsRule} alt="" />
-      <fieldset className="scenario-periods">
-        <legend className="visually-hidden">Период сценария</legend>
-        {periods.map((period, index) => (
-          <label key={period.name}>
-            <input className="visually-hidden" type="radio" name="scenario-period"
-              checked={selected === index} onChange={() => onSelect(index)} />
-            <span>{period.name}</span>
-          </label>
-        ))}
-      </fieldset>
+      <PeriodTabs periods={periods} selected={selected} onSelect={onSelect} name="scenario-period" />
       <div className="scenario-details" aria-label={name}>
         <section className="scenario-light" aria-labelledby="scenario-light-title">
           <h2 id="scenario-light-title">Свет</h2>

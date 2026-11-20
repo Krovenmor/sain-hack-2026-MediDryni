@@ -1,13 +1,14 @@
 import { useId, useRef, useState } from "react";
 import orb from "../assets/orb.png";
 import menuIcon from "../assets/menu.svg";
+import manualMenuIcon from "../assets/manual-menu.svg";
 import cardRule from "../assets/card-rule.svg";
 import timeRule from "../assets/time-rule.svg";
 import { LightBeam } from "./LightBeam.jsx";
 import { LightSettings } from "./LightSettings.jsx";
+import { ManualSettings } from "./ManualSettings.jsx";
+import { initialManualSettings } from "./manualSettings.js";
 import { Scenario } from "./Scenario.jsx";
-
-const settingsHint = "Будет доступно после подключения управления номером";
 
 function SettingsList({ settings }) {
   return (
@@ -17,7 +18,7 @@ function SettingsList({ settings }) {
   );
 }
 
-function PeriodCard({ period, expanded, onSelect, onShowPlan }) {
+function PeriodCard({ period, expanded, onSelect, onShowPlan, onShowManual }) {
   const contentId = useId();
   return (
     <article className={expanded ? "period expanded" : "period"}>
@@ -30,7 +31,7 @@ function PeriodCard({ period, expanded, onSelect, onShowPlan }) {
         <img className="card-rule" src={cardRule} alt="" />
         <SettingsList settings={period.settings} />
         <div className="period-actions">
-          <button className="pill" disabled title={settingsHint}>Ручная настройка</button>
+          <button className="pill" onClick={onShowManual}>Ручная настройка</button>
           <button className="pill dark show-plan" onClick={onShowPlan}>
             Полный сценарий
           </button>
@@ -61,12 +62,12 @@ function Navigation({ dialogRef, screen, onNavigate }) {
           ["home", "Главная"],
           ["scenario", "Сценарий"],
           ["light", "Умная настройка"],
+          ["manual", "Ручная настройка"],
         ].map(([id, name]) => (
           <button key={id} aria-current={screen === id ? "page" : undefined} onClick={() => onNavigate(id)}>
             {name}
           </button>
         ))}
-        <button disabled>Ручная настройка</button>
       </nav>
     </dialog>
   );
@@ -75,6 +76,8 @@ function Navigation({ dialogRef, screen, onNavigate }) {
 export function Welcome({ stay }) {
   const [selected, setSelected] = useState(0);
   const [scenarioPeriod, setScenarioPeriod] = useState(0);
+  const [manualPeriod, setManualPeriod] = useState(0);
+  const [manualSettings, setManualSettings] = useState(() => initialManualSettings(stay));
   const [screen, setScreen] = useState("home");
   const [lightMode, setLightMode] = useState("warm");
   const menu = useRef(null);
@@ -88,6 +91,17 @@ export function Welcome({ stay }) {
     setScenarioPeriod(index);
     navigate("scenario");
   }
+  function showManual(index) {
+    setManualPeriod(index);
+    navigate("manual");
+  }
+  function updateManual(field, value) {
+    setManualSettings(previous => {
+      if (previous[manualPeriod][field] === value) return previous;
+      return previous.map((settings, index) => index === manualPeriod ? { ...settings, [field]: value } : settings);
+    });
+    if (field === "kelvin") setLightMode(value < 3100 ? "warm" : value < 5250 ? "neutral" : "cold");
+  }
 
   return (
     <>
@@ -100,7 +114,7 @@ export function Welcome({ stay }) {
         <header className="topbar">
           <button className="menu-button" id="open-menu" aria-label="Открыть навигацию"
             aria-haspopup="dialog" onClick={() => menu.current.showModal()}>
-            <img src={menuIcon} alt="" />
+            <img src={screen === "manual" ? manualMenuIcon : menuIcon} alt="" />
           </button>
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
@@ -109,6 +123,10 @@ export function Welcome({ stay }) {
         )}
         {screen === "scenario" && (
           <Scenario periods={stay.periods} selected={scenarioPeriod} onSelect={setScenarioPeriod} wakeUp={stay.wakeUp} />
+        )}
+        {screen === "manual" && (
+          <ManualSettings periods={stay.periods} selected={manualPeriod} onSelect={setManualPeriod}
+            settings={manualSettings[manualPeriod]} onChange={updateManual} onShowSmart={() => navigate("light")} />
         )}
         {screen === "home" && (
           <>
@@ -128,7 +146,8 @@ export function Welcome({ stay }) {
               <div className="periods" id="periods">
                 {stay.periods.slice(0, 3).map((period, index) => (
                   <PeriodCard key={period.name} period={period} expanded={selected === index}
-                    onSelect={() => setSelected(index)} onShowPlan={() => showPlan(index)} />
+                    onSelect={() => setSelected(index)} onShowPlan={() => showPlan(index)}
+                    onShowManual={() => showManual(index)} />
                 ))}
               </div>
             </section>
