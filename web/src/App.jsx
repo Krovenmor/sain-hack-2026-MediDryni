@@ -3,6 +3,7 @@ import orb from "../assets/orb.png";
 import menuIcon from "../assets/menu.svg";
 import manualMenuIcon from "../assets/manual-menu.svg";
 import { LightBeam } from "./components/LightBeam.jsx";
+import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
 import { initialManualSettings } from "./screens/manual/manualSettings.js";
@@ -18,6 +19,7 @@ export function App({ stay }) {
   const [screen, setScreen] = useState("home");
   const [lightMode, setLightMode] = useState("warm");
   const [chatTurns, setChatTurns] = useState([]);
+  const chatReply = useChatReply(chatTurns.at(-1));
   const menu = useRef(null);
   function navigate(nextScreen) {
     if (menu.current.open) menu.current.close();
@@ -57,7 +59,7 @@ export function App({ stay }) {
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
         {screen === "light" && (
-          <LightSettings mode={lightMode} onModeChange={setLightMode} stay={stay} turns={chatTurns}
+          <LightSettings mode={lightMode} onModeChange={setLightMode} stay={stay} turns={chatTurns} chatReply={chatReply}
             onSend={turn => setChatTurns(previous => [...previous, turn])} />
         )}
         {screen === "scenario" && (

@@ -6,13 +6,12 @@ export function useChatLineFade(log, turns, showPhrases) {
     if (!viewport) return;
     let frame = 0;
     let disposed = false;
-    const blocks = viewport.querySelectorAll(".guest-text, .room-message p");
 
     function update() {
       frame = 0;
       const { top, bottom, height } = viewport.getBoundingClientRect();
       if (!height) return;
-      for (const block of blocks) {
+      for (const block of viewport.querySelectorAll(".guest-text, .room-message p")) {
         const rect = block.getBoundingClientRect();
         if (rect.bottom <= top || rect.top >= bottom) continue;
         const maskTarget = block.closest(".guest-message") ?? block;
@@ -38,15 +37,24 @@ export function useChatLineFade(log, turns, showPhrases) {
 
     viewport.scrollTop = viewport.scrollHeight;
     update();
-    const observer = new ResizeObserver(schedule);
+    let following = true;
+    function onScroll() {
+      following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 4;
+      schedule();
+    }
+    const observer = new ResizeObserver(() => {
+      if (following) viewport.scrollTop = viewport.scrollHeight;
+      schedule();
+    });
     observer.observe(viewport);
-    viewport.addEventListener("scroll", schedule, { passive: true });
+    if (viewport.lastElementChild) observer.observe(viewport.lastElementChild);
+    viewport.addEventListener("scroll", onScroll, { passive: true });
     document.fonts.ready.then(schedule);
     return () => {
       disposed = true;
       cancelAnimationFrame(frame);
       observer.disconnect();
-      viewport.removeEventListener("scroll", schedule);
+      viewport.removeEventListener("scroll", onScroll);
     };
   }, [log, turns, showPhrases]);
 }

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function useMicrophoneLevel(enabled, orb) {
   const [error, setError] = useState("");
+  const stop = useRef(null);
 
   useEffect(() => {
     setError("");
@@ -12,11 +13,14 @@ export function useMicrophoneLevel(enabled, orb) {
     let disposed = false;
     let stream;
     let context;
+    let recorder;
     let frame;
 
     function release() {
       cancelAnimationFrame(frame);
       image.style.removeProperty("--voice-scale");
+      stop.current = null;
+      if (recorder?.state === "recording") recorder.stop();
       stream?.getTracks().forEach(track => track.stop());
       stream = undefined;
       if (context && context.state !== "closed") void context.close().catch(() => {});
@@ -37,6 +41,27 @@ export function useMicrophoneLevel(enabled, orb) {
         }
         stream = input;
         stream.getAudioTracks().forEach(track => track.addEventListener("ended", microphoneEnded, { once: true }));
+        recorder = new MediaRecorder(stream);
+        const chunks = [];
+        const recording = new Promise(resolve => {
+          recorder.addEventListener("dataavailable", event => chunks.push(event.data));
+          recorder.addEventListener("stop", () => {
+            resolve(disposed ? null : new Blob(chunks, { type: recorder.mimeType }));
+          }, { once: true });
+          recorder.addEventListener("error", () => {
+            resolve(null);
+            if (!disposed) {
+              setError("Не удалось записать голосовое");
+              release();
+            }
+          }, { once: true });
+        });
+        recorder.start();
+        stop.current = () => {
+          if (recorder.state !== "recording") return null;
+          recorder.stop();
+          return recording;
+        };
         context = new AudioContext();
         const analyser = context.createAnalyser();
         analyser.fftSize = 1024;
@@ -69,5 +94,5 @@ export function useMicrophoneLevel(enabled, orb) {
     };
   }, [enabled, orb]);
 
-  return enabled ? error : "";
+  return { error: enabled ? error : "", stopRecording: () => stop.current?.() ?? null };
 }

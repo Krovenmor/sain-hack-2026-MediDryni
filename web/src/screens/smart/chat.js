@@ -1,5 +1,14 @@
 export const quickPhrases = ["Не беспокоить", "Я проснулся", "Как вчера", "Я ложусь", "Как дома"];
 
+export function composeDemoVoiceTurn(recording) {
+  if (!recording?.size) return null;
+  return {
+    text: "Голосовое сообщение",
+    heading: "Голосовое получено",
+    reply: "Распознавание речи пока недоступно. Напишите просьбу текстом.",
+  };
+}
+
 export function composeDemoTurn(message, stay) {
   const text = message.trim();
   if (!text) return null;
