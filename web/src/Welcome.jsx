@@ -3,6 +3,7 @@ import orb from "../assets/orb.png";
 import menuIcon from "../assets/menu.svg";
 import cardRule from "../assets/card-rule.svg";
 import timeRule from "../assets/time-rule.svg";
+import { LightSettings } from "./LightSettings.jsx";
 
 const settingsHint = "Будет доступно после подключения управления номером";
 
@@ -46,7 +47,7 @@ function closeOnBackdrop(event) {
   }
 }
 
-function Navigation({ dialogRef, onShowPlan }) {
+function Navigation({ dialogRef, onShowPlan, showingLight, onShowLight }) {
   const close = () => dialogRef.current.close();
   return (
     <dialog ref={dialogRef} className="drawer" id="menu" aria-labelledby="menu-title" onClick={closeOnBackdrop}>
@@ -55,9 +56,11 @@ function Navigation({ dialogRef, onShowPlan }) {
       </button>
       <h2 id="menu-title">Навигация</h2>
       <nav aria-label="Разделы">
-        <button className="current" aria-current="page" onClick={close}>Главная</button>
+        <button className={showingLight ? undefined : "current"} aria-current={showingLight ? undefined : "page"}
+          onClick={() => { close(); onShowLight(false); }}>Главная</button>
         <button className="show-plan" aria-haspopup="dialog" onClick={onShowPlan}>Сценарий</button>
-        <button disabled>Умная настройка</button>
+        <button className={showingLight ? "current" : undefined} aria-current={showingLight ? "page" : undefined}
+          onClick={() => { close(); onShowLight(true); }}>Умная настройка</button>
         <button disabled>Ручная настройка</button>
       </nav>
     </dialog>
@@ -85,6 +88,8 @@ function FullPlan({ dialogRef, periods }) {
 
 export function Welcome({ stay }) {
   const [selected, setSelected] = useState(0);
+  const [showingLight, setShowingLight] = useState(false);
+  const [lightMode, setLightMode] = useState("warm");
   const menu = useRef(null);
   const plan = useRef(null);
   function showPlan() {
@@ -94,11 +99,11 @@ export function Welcome({ stay }) {
 
   return (
     <>
-      <main className="welcome">
-        <div className="sky" aria-hidden="true">
+      <main className={showingLight ? "welcome light-screen" : "welcome"}>
+        {!showingLight && <div className="sky" aria-hidden="true">
           <img className="orb orb-four" src={orb} alt="" />
           <img className="orb orb-five" src={orb} alt="" />
-        </div>
+        </div>}
         <header className="topbar">
           <button className="menu-button" id="open-menu" aria-label="Открыть навигацию"
             aria-haspopup="dialog" onClick={() => menu.current.showModal()}>
@@ -106,28 +111,34 @@ export function Welcome({ stay }) {
           </button>
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
-        <section className="arrival" aria-labelledby="greeting">
-          <h1 id="greeting">Добро пожаловать,<span id="guest" className="guest">{stay.guestName}</span></h1>
-          <div className="check-in">
-            <time id="check-in-time" dateTime={stay.checkInTime}>{stay.checkInTime}</time>
-            <img className="time-rule" src={timeRule} alt="" />
-            <span>время<br />заезда</span>
-          </div>
-        </section>
-        <section className="room" aria-labelledby="room-title">
-          <div className="room-heading">
-            <h2 id="room-title">Ваш номер</h2>
-            <button className="pill" disabled title={settingsHint}>Умная настройка</button>
-          </div>
-          <div className="periods" id="periods">
-            {stay.periods.map((period, index) => (
-              <PeriodCard key={period.name} period={period} expanded={selected === index}
-                onSelect={() => setSelected(index)} onShowPlan={showPlan} />
-            ))}
-          </div>
-        </section>
+        {showingLight ? (
+          <LightSettings mode={lightMode} onModeChange={setLightMode} />
+        ) : (
+          <>
+            <section className="arrival" aria-labelledby="greeting">
+              <h1 id="greeting">Добро пожаловать,<span id="guest" className="guest">{stay.guestName}</span></h1>
+              <div className="check-in">
+                <time id="check-in-time" dateTime={stay.checkInTime}>{stay.checkInTime}</time>
+                <img className="time-rule" src={timeRule} alt="" />
+                <span>время<br />заезда</span>
+              </div>
+            </section>
+            <section className="room" aria-labelledby="room-title">
+              <div className="room-heading">
+                <h2 id="room-title">Ваш номер</h2>
+                <button className="pill" onClick={() => setShowingLight(true)}>Умная настройка</button>
+              </div>
+              <div className="periods" id="periods">
+                {stay.periods.map((period, index) => (
+                  <PeriodCard key={period.name} period={period} expanded={selected === index}
+                    onSelect={() => setSelected(index)} onShowPlan={showPlan} />
+                ))}
+              </div>
+            </section>
+          </>
+        )}
       </main>
-      <Navigation dialogRef={menu} onShowPlan={showPlan} />
+      <Navigation dialogRef={menu} onShowPlan={showPlan} showingLight={showingLight} onShowLight={setShowingLight} />
       <FullPlan dialogRef={plan} periods={stay.periods} />
     </>
   );
