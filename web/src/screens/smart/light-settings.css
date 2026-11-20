@@ -168,10 +168,7 @@
 .light-screen .topbar { transition: opacity 480ms ease; }
 .light-screen:has([data-voice-open="true"]) .topbar { opacity: .66; }
 .light-settings[data-voice-open="true"] :is(.chat-log, .light-title) { visibility: hidden; }
-.light-settings[data-voice-open="true"] .light-composer { border-color: transparent; box-shadow: none; }
-.light-settings[data-voice-open="true"] .light-composer:not(:focus-within) :is(input, button[type="submit"]) {
-  opacity: .52;
-}
+.light-settings[data-voice-open="true"] .light-composer { justify-content: flex-end; border-color: transparent; box-shadow: none; }
 .voice-light {
   position: absolute;
   z-index: -1;

@@ -62,11 +62,8 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
   async function toggleVoice() {
     if (inputBusy) return;
     setRecordingStatus("");
-    if (!voiceOpen || (voiceTurn && !draft.trim())) {
+    if (!voiceOpen || voiceTurn) {
       setVoiceStart(turns.length);
-    } else if (draft.trim()) {
-      sendText(draft);
-      setDraft("");
     } else {
       const recording = stopRecording();
       if (!recording) {
@@ -81,7 +78,7 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
       setFinishingRecording(false);
       const turn = composeDemoVoiceTurn(audio);
       if (turn) onSend(turn);
-      else setRecordingStatus("Не удалось записать голосовое. Введите просьбу текстом.");
+      else setRecordingStatus("Не удалось записать голосовое. Вернитесь в чат, чтобы написать просьбу.");
     }
   }
 
@@ -134,10 +131,10 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
         <div className="light-mode-row" hidden={voiceOpen}>
           <fieldset className="light-modes" id="light-modes" hidden={showPhrases}>
             <legend className="visually-hidden">Цвет света</legend>
-            {lightModes.map(({ id, name, swatch }) => (
+            {lightModes.map(({ id, name, swatch, kelvin }) => (
               <label key={id} style={{ "--swatch": swatch }}>
                 <input className="visually-hidden" type="radio" name="light-color" value={id} checked={mode === id}
-                  onChange={() => onModeChange(id)} />
+                  onChange={() => onModeChange(kelvin)} />
                 <span>{name}</span>
               </label>
             ))}
@@ -152,14 +149,16 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
         </div>
         <form className="light-composer" onSubmit={event => {
           event.preventDefault();
+          if (voiceOpen || inputBusy) return;
           sendText(draft);
           setDraft("");
-          if (voiceOpen) event.currentTarget.querySelector("input").blur();
         }}>
-          <input aria-label="Сообщение" placeholder="Сообщение" value={draft} disabled={inputBusy}
-            onChange={event => setDraft(event.target.value)} />
-          <button type="submit" aria-label="Отправить сообщение" disabled={inputBusy || !draft.trim()}><img src={send} alt="" /></button>
-          <button className="voice-toggle" type="button" aria-label="Голосовой режим"
+          {!voiceOpen && <>
+            <input aria-label="Сообщение" placeholder="Сообщение" value={draft} disabled={inputBusy}
+              onChange={event => setDraft(event.target.value)} />
+            <button type="submit" aria-label="Отправить сообщение" disabled={inputBusy || !draft.trim()}><img src={send} alt="" /></button>
+          </>}
+          <button className="voice-toggle" type="button" aria-label={voiceOpen && !voiceTurn ? "Отправить голосовое сообщение" : "Начать запись"}
             aria-pressed={voiceOpen} disabled={inputBusy} onClick={toggleVoice}>
             <img ref={orb} className="voice-orb" src={voiceOrb} alt="" width="169" height="163" />
             <img className="voice-icon" src={microphone} alt="" />

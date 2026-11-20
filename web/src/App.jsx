@@ -6,41 +6,37 @@ import { LightBeam } from "./components/LightBeam.jsx";
 import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
-import { initialManualSettings } from "./screens/manual/manualSettings.js";
+import { updatePeriod } from "./data/staySettings.js";
 import { Scenario } from "./screens/scenario/Scenario.jsx";
 import { Welcome } from "./screens/home/Welcome.jsx";
 import { Navigation } from "./components/Navigation.jsx";
 
-export function App({ stay }) {
+export function App({ stay: initialStay }) {
+  const [stay, setStay] = useState(initialStay);
   const [selected, setSelected] = useState(0);
-  const [scenarioPeriod, setScenarioPeriod] = useState(0);
-  const [manualPeriod, setManualPeriod] = useState(0);
-  const [manualSettings, setManualSettings] = useState(() => initialManualSettings(stay));
   const [screen, setScreen] = useState("home");
-  const [lightMode, setLightMode] = useState("warm");
+  const { kelvin } = stay.periods[selected].light;
+  const lightMode = kelvin < 3100 ? "warm" : kelvin < 5250 ? "neutral" : "cold";
   const [chatTurns, setChatTurns] = useState([]);
   const chatReply = useChatReply(chatTurns.at(-1));
   const menu = useRef(null);
   function navigate(nextScreen) {
     if (menu.current.open) menu.current.close();
     if (nextScreen === screen) return;
+    if (nextScreen === "home" && selected >= 3) setSelected(0);
     setScreen(nextScreen);
     window.scrollTo(0, 0);
   }
-  function showPlan(index) {
-    setScenarioPeriod(index);
-    navigate("scenario");
+  function changePeriod(changes) {
+    setStay(previous => updatePeriod(previous, selected, changes));
   }
-  function showManual(index) {
-    setManualPeriod(index);
-    navigate("manual");
+  function changeLight(changes) {
+    setStay(previous => updatePeriod(previous, selected, {
+      light: { ...previous.periods[selected].light, ...changes },
+    }));
   }
-  function updateManual(field, value) {
-    setManualSettings(previous => {
-      if (previous[manualPeriod][field] === value) return previous;
-      return previous.map((settings, index) => index === manualPeriod ? { ...settings, [field]: value } : settings);
-    });
-    if (field === "kelvin") setLightMode(value < 3100 ? "warm" : value < 5250 ? "neutral" : "cold");
+  function changeAlarm(changes) {
+    setStay(previous => ({ ...previous, wakeUp: { ...previous.wakeUp, ...changes } }));
   }
 
   return (
@@ -59,19 +55,20 @@ export function App({ stay }) {
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
         {screen === "light" && (
-          <LightSettings mode={lightMode} onModeChange={setLightMode} stay={stay} turns={chatTurns} chatReply={chatReply}
+          <LightSettings mode={lightMode} onModeChange={kelvin => changeLight({ kelvin })} stay={stay} turns={chatTurns} chatReply={chatReply}
             onSend={turn => setChatTurns(previous => [...previous, turn])} />
         )}
         {screen === "scenario" && (
-          <Scenario periods={stay.periods} selected={scenarioPeriod} onSelect={setScenarioPeriod} wakeUp={stay.wakeUp} />
+          <Scenario periods={stay.periods} selected={selected} onSelect={setSelected} wakeUp={stay.wakeUp} />
         )}
         {screen === "manual" && (
-          <ManualSettings periods={stay.periods} selected={manualPeriod} onSelect={setManualPeriod}
-            settings={manualSettings[manualPeriod]} onChange={updateManual} onShowSmart={() => navigate("light")} />
+          <ManualSettings periods={stay.periods} selected={selected} onSelect={setSelected}
+            wakeUp={stay.wakeUp} onPeriodChange={changePeriod} onLightChange={changeLight}
+            onAlarmChange={changeAlarm} onShowSmart={() => navigate("light")} />
         )}
         {screen === "home" && (
-          <Welcome stay={stay} selected={selected} setSelected={setSelected} showPlan={showPlan}
-            showManual={showManual} showSmart={() => navigate("light")} />
+          <Welcome stay={stay} selected={selected} setSelected={setSelected} showPlan={() => navigate("scenario")}
+            showManual={() => navigate("manual")} showSmart={() => navigate("light")} />
         )}
       </main>
       <Navigation dialogRef={menu} screen={screen} onNavigate={navigate} />

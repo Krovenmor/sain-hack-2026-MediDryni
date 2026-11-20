@@ -2,7 +2,10 @@
 export const demoStay = {
   guestName: "Анастасия",
   checkInTime: "20:00",
-  wakeUp: { time: "05:30", description: "со светомузыкой" },
+  wakeUp: {
+    time: "05:30", enabled: true, soundOn: true, alarmLight: true,
+    volume: 30, track: "Приветствие отеля", dawnMinutes: 30,
+  },
   periods: [
     {
       name: "Вечер",
@@ -10,7 +13,6 @@ export const demoStay = {
       curtains: 30,
       temperature: 26,
       doNotDisturb: true,
-      settings: ["Свет: 2200 К", "Яркость: 30 %", "Температура: 26 °C"],
     },
     {
       name: "Ночь",
@@ -18,7 +20,6 @@ export const demoStay = {
       curtains: 0,
       temperature: 19,
       doNotDisturb: true,
-      settings: ["Свет: выключен", "Температура: 19 °C", "Шторы: закрыты", "Не беспокоить: вкл."],
     },
     {
       name: "Утро",
@@ -26,7 +27,6 @@ export const demoStay = {
       curtains: 65,
       temperature: 21,
       doNotDisturb: false,
-      settings: ["Рассвет: с 05:00", "Будильник: 05:30", "Режим: свет"],
     },
     {
       name: "День",

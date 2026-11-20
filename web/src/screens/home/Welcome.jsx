@@ -1,6 +1,7 @@
 import { useId } from "react";
 import cardRule from "../../../assets/card-rule.svg";
 import timeRule from "../../../assets/time-rule.svg";
+import { periodSummary } from "../../data/staySettings.js";
 import "./welcome.css";
 
 function SettingsList({ settings }) {
@@ -11,7 +12,7 @@ function SettingsList({ settings }) {
   );
 }
 
-function PeriodCard({ period, expanded, onSelect, onShowPlan, onShowManual }) {
+function PeriodCard({ period, wakeUp, expanded, onSelect, onShowPlan, onShowManual }) {
   const contentId = useId();
   return (
     <article className={expanded ? "period expanded" : "period"}>
@@ -22,7 +23,7 @@ function PeriodCard({ period, expanded, onSelect, onShowPlan, onShowManual }) {
       <div className="period-content" id={contentId} inert={!expanded}>
         <h3>{period.name}</h3>
         <img className="card-rule" src={cardRule} alt="" />
-        <SettingsList settings={period.settings} />
+        <SettingsList settings={periodSummary(period, wakeUp)} />
         <div className="period-actions">
           <button className="pill" onClick={onShowManual}>Ручная настройка</button>
           <button className="pill dark show-plan" onClick={onShowPlan}>
@@ -52,9 +53,9 @@ export function Welcome({ stay, selected, setSelected, showPlan, showManual, sho
         </div>
         <div className="periods" id="periods">
           {stay.periods.slice(0, 3).map((period, index) => (
-            <PeriodCard key={period.name} period={period} expanded={selected === index}
-              onSelect={() => setSelected(index)} onShowPlan={() => showPlan(index)}
-              onShowManual={() => showManual(index)} />
+            <PeriodCard key={period.name} period={period} wakeUp={stay.wakeUp} expanded={selected === index}
+              onSelect={() => setSelected(index)} onShowPlan={showPlan}
+              onShowManual={showManual} />
           ))}
         </div>
       </section>

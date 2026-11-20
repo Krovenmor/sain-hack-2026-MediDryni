@@ -1,6 +1,7 @@
 import climateRays from "../../../assets/scenario-climate-rays.png";
 import climateRule from "../../../assets/scenario-climate-rule.svg";
 import { PeriodTabs } from "../../components/PeriodTabs.jsx";
+import { alarmMode } from "../../data/staySettings.js";
 import "./scenario.css";
 
 export function Scenario({ periods, selected, onSelect, wakeUp }) {
@@ -37,9 +38,11 @@ export function Scenario({ periods, selected, onSelect, wakeUp }) {
           <p className="scenario-dnd">Не<br />беспокоить{!doNotDisturb && <small>выкл.</small>}</p>
         </section>
         <section className="scenario-wakeup" aria-labelledby="scenario-wakeup-title">
-          <h2 id="scenario-wakeup-title">РАЗБУДИМ в</h2>
-          <time dateTime={wakeUp.time}>{wakeUp.time}</time>
-          <p>{wakeUp.description}</p>
+          <h2 id="scenario-wakeup-title">{wakeUp.enabled ? "РАЗБУДИМ в" : "Будильник выключен"}</h2>
+          {wakeUp.enabled && <>
+            <time dateTime={wakeUp.time}>{wakeUp.time}</time>
+            <p>{alarmMode(wakeUp)}</p>
+          </>}
         </section>
       </div>
     </section>

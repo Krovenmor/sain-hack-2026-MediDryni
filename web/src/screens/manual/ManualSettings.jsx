@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import arrow from "../../../assets/manual-track-arrow.svg";
 import { ClimateDial, ManualSlider, ManualSwitch, TimeWheel } from "./ManualControls.jsx";
 import { PeriodTabs } from "../../components/PeriodTabs.jsx";
+import { formatTime, toggleLight } from "../../data/staySettings.js";
 import { tracks } from "./manualSettings.js";
 import "./manual-settings.css";
 
@@ -47,8 +48,11 @@ function TrackPicker({ selected, onSelect, disabled }) {
   );
 }
 
-export function ManualSettings({ periods, selected, onSelect, settings, onChange, onShowSmart }) {
-  const update = field => value => onChange(field, value);
+export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart }) {
+  const period = periods[selected];
+  const { light } = period;
+  const lit = light.brightness > 0;
+  const [hour, minute] = wakeUp.time.split(":").map(Number);
 
   return (
     <section className="manual-settings" aria-labelledby="manual-title">
@@ -59,53 +63,53 @@ export function ManualSettings({ periods, selected, onSelect, settings, onChange
           <section className="manual-card manual-light" aria-labelledby="manual-light-title">
             <div className="manual-card-heading">
               <h2 id="manual-light-title">свет</h2>
-              <ManualSwitch label="Свет" checked={settings.lightOn} onChange={update("lightOn")} />
+              <ManualSwitch label="Свет" checked={lit} onChange={enabled => onLightChange(toggleLight(light, enabled))} />
             </div>
             <ManualSlider label="Температура" min={2200} max={6500} step={50} unit="К"
-              value={settings.kelvin} onChange={update("kelvin")} disabled={!settings.lightOn} />
-            <ManualSlider label="Яркость" value={settings.brightness}
-              onChange={update("brightness")} disabled={!settings.lightOn} />
+              value={light.kelvin} onChange={kelvin => onLightChange({ kelvin })} disabled={!lit} />
+            <ManualSlider label="Яркость" value={light.brightness}
+              onChange={brightness => onLightChange(brightness ? { brightness } : toggleLight(light, false))} disabled={!lit} />
           </section>
           <section className="manual-card manual-climate" aria-labelledby="manual-climate-title">
             <h2 id="manual-climate-title">климат</h2>
-            <ClimateDial value={settings.climate} onChange={update("climate")} />
+            <ClimateDial value={period.temperature} onChange={temperature => onPeriodChange({ temperature })} />
           </section>
         </div>
         <div className="manual-row manual-row-middle">
           <section className="manual-card manual-dnd" aria-labelledby="manual-dnd-title">
             <h2 id="manual-dnd-title">не<br />беспокоить</h2>
-            <ManualSwitch label="Не беспокоить" checked={settings.doNotDisturb} onChange={update("doNotDisturb")} />
+            <ManualSwitch label="Не беспокоить" checked={period.doNotDisturb} onChange={doNotDisturb => onPeriodChange({ doNotDisturb })} />
           </section>
           <section className="manual-card manual-curtains" aria-labelledby="manual-curtains-title">
             <h2 id="manual-curtains-title">шторы</h2>
-            <ManualSlider label="Степень открытости" value={settings.curtains} onChange={update("curtains")} />
+            <ManualSlider label="Степень открытости" value={period.curtains} onChange={curtains => onPeriodChange({ curtains })} />
           </section>
         </div>
         <section className="manual-card manual-alarm" aria-labelledby="manual-alarm-title">
           <div className="manual-card-heading">
             <h2 id="manual-alarm-title">будильник</h2>
-            <ManualSwitch label="Будильник" checked={settings.alarmOn} onChange={update("alarmOn")} />
+            <ManualSwitch label="Будильник" checked={wakeUp.enabled} onChange={enabled => onAlarmChange({ enabled })} />
           </div>
-          <div className="alarm-time" data-disabled={!settings.alarmOn}>
-            <TimeWheel label="Часы" max={23} value={settings.hour}
-              onChange={update("hour")} disabled={!settings.alarmOn} />
+          <div className="alarm-time" data-disabled={!wakeUp.enabled}>
+            <TimeWheel label="Часы" max={23} value={hour}
+              onChange={value => onAlarmChange({ time: formatTime(value, minute) })} disabled={!wakeUp.enabled} />
             <span aria-hidden="true">:</span>
-            <TimeWheel label="Минуты" max={59} value={settings.minute}
-              onChange={update("minute")} disabled={!settings.alarmOn} />
+            <TimeWheel label="Минуты" max={59} value={minute}
+              onChange={value => onAlarmChange({ time: formatTime(hour, value) })} disabled={!wakeUp.enabled} />
           </div>
           <div className="manual-sound-heading">
             <h3>звук</h3>
-            <ManualSwitch label="Звук" checked={settings.soundOn} onChange={update("soundOn")} />
+            <ManualSwitch label="Звук" checked={wakeUp.soundOn} onChange={soundOn => onAlarmChange({ soundOn })} />
           </div>
           <div className="manual-sound">
             <div className="track-cover" aria-hidden="true" />
-            <ManualSlider label="Громкость" value={settings.volume}
-              onChange={update("volume")} disabled={!settings.soundOn} />
+            <ManualSlider label="Громкость" value={wakeUp.volume}
+              onChange={volume => onAlarmChange({ volume })} disabled={!wakeUp.soundOn} />
           </div>
-          <TrackPicker key={selected} selected={settings.track} onSelect={update("track")} disabled={!settings.soundOn} />
+          <TrackPicker key={selected} selected={wakeUp.track} onSelect={track => onAlarmChange({ track })} disabled={!wakeUp.soundOn} />
           <div className="manual-card-heading manual-alarm-light">
             <h3>сопровождение светом</h3>
-            <ManualSwitch label="Сопровождение светом" checked={settings.alarmLight} onChange={update("alarmLight")} />
+            <ManualSwitch label="Сопровождение светом" checked={wakeUp.alarmLight} onChange={alarmLight => onAlarmChange({ alarmLight })} />
           </div>
         </section>
       </div>

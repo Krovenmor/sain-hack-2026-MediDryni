@@ -4,9 +4,9 @@ import cold from "../../assets/light-cold.svg";
 import "./light-beam.css";
 
 export const lightModes = [
-  { id: "warm", name: "Тёплый", image: warm, swatch: "#f0ad65" },
-  { id: "neutral", name: "Нейтральный", image: neutral, swatch: "#fff2da" },
-  { id: "cold", name: "Холодный", image: cold, swatch: "#b8e8ff" },
+  { id: "warm", kelvin: 2200, name: "Тёплый", image: warm, swatch: "#f0ad65" },
+  { id: "neutral", kelvin: 4000, name: "Нейтральный", image: neutral, swatch: "#fff2da" },
+  { id: "cold", kelvin: 6500, name: "Холодный", image: cold, swatch: "#b8e8ff" },
 ];
 
 export function LightBeam({ mode }) {
