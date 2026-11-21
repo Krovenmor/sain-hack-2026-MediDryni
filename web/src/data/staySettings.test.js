@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoStay } from "./demoStay.js";
-import { alarmMode, periodSummary, toggleLight, updatePeriod } from "./staySettings.js";
+import { alarmMode, periodSummary, settingsPatch, toggleLight, updatePeriod } from "./staySettings.js";
+
+test("PATCH omits untouched fields, restored values and the local brightness cache", () => {
+  const stay = { ...demoStay, revision: 2 };
+  const draft = {
+    evening: toggleLight(stay.periods[0].light, false),
+    night: { temperature: stay.periods[1].temperature },
+  };
+  assert.deepEqual(settingsPatch(stay, draft, { time: stay.wakeUp.time, volume: 45 }), {
+    revision: 2, periods: { evening: { brightness: 0 } }, alarm: { volume: 45 },
+  });
+});
 
 test("changing a period updates its card, preserving the other periods", () => {
   const night = updatePeriod(demoStay, 1, { temperature: 18, doNotDisturb: false, curtains: 15 });

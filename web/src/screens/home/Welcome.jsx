@@ -12,13 +12,13 @@ function SettingsList({ settings }) {
   );
 }
 
-function PeriodCard({ period, wakeUp, expanded, onSelect, onShowPlan, onShowManual }) {
+function PeriodCard({ period, wakeUp, expanded, current, onSelect, onShowPlan, onShowManual }) {
   const contentId = useId();
   return (
-    <article className={expanded ? "period expanded" : "period"}>
+    <article className={expanded ? "period expanded" : "period"} data-current={current}>
       <div className="period-inner">
         <button className="period-toggle" aria-label={period.name}
-          aria-controls={contentId} aria-expanded={expanded} onClick={onSelect}>
+          aria-controls={contentId} aria-expanded={expanded} aria-current={current ? "time" : undefined} onClick={onSelect}>
           {period.name.toLocaleLowerCase("ru")}
         </button>
         <div className="period-content" id={contentId} inert={!expanded}>
@@ -40,7 +40,7 @@ function PeriodCard({ period, wakeUp, expanded, onSelect, onShowPlan, onShowManu
   );
 }
 
-export function Welcome({ stay, selected, setSelected, showPlan, showManual, showSmart }) {
+export function Welcome({ stay, currentPeriod, selected, setSelected, showPlan, showManual, showSmart }) {
   return (
     <>
       <section className="arrival" aria-labelledby="greeting">
@@ -59,10 +59,11 @@ export function Welcome({ stay, selected, setSelected, showPlan, showManual, sho
         <div className="periods" id="periods">
           {stay.periods.slice(0, 3).map((period, index) => (
             <PeriodCard key={period.name} period={period} wakeUp={stay.wakeUp} expanded={selected === index}
-              onSelect={() => setSelected(index)} onShowPlan={showPlan}
+              current={currentPeriod === index} onSelect={() => setSelected(index)} onShowPlan={showPlan}
               onShowManual={showManual} />
           ))}
         </div>
+        {currentPeriod === 3 && <p className="home-day">Сейчас день</p>}
       </section>
     </>
   );

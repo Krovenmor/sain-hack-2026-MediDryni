@@ -15,7 +15,10 @@ from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
-from concierge_service.ports.ai import AbsoluteAmount, EmptySlots, NoSlotsInterpretation, NumericInterpretation, RelativeAmount
+from concierge_service.ports.ai import (
+    AbsoluteAmount, AlarmSetInterpretation, AlarmSetSlots, EmptySlots, NoSlotsInterpretation,
+    NumericInterpretation, RelativeAmount,
+)
 from concierge_service.service.demo import DemoService
 from concierge_service.transport.http.demo import install_demo
 from test_concierge_stage1 import dataset_payload
@@ -26,6 +29,7 @@ class DemoFixture(unittest.IsolatedAsyncioTestCase):
         self.dataset = dataset_payload()
         self.datasets = {"case2-test-v1": self.dataset}
         self.run_id = str(uuid4())
+        self.run_ttl = timedelta(minutes=45)
         self.final_runs = set()
         self.final_dataset_id = "case2-final-test"
         self.fail_session = False
@@ -85,7 +89,7 @@ class DemoFixture(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(body, {"case": 2})
                 run_id, dataset_id = self.run_id, "case2-test-v1"
             return httpx.Response(201, json={"run_id": run_id, "dataset_id": dataset_id,
-                                            "expires_at": (datetime.now(UTC) + timedelta(minutes=45)).isoformat()})
+                                            "expires_at": (datetime.now(UTC) + self.run_ttl).isoformat()})
         if path == "/room/session":
             run_id = body["run_id"]
             self.assertIn(run_id, self.final_runs | {self.run_id})
@@ -354,6 +358,47 @@ class DemoStartTests(DemoFixture):
             self.assertIn("06:30", state.json()["state"]["alarm"]["at"])
         self.assertEqual(data["stays"][0]["target_wake_at"][11:16], "07:00")
 
+    async def test_alarm_patch_preserves_other_chat_fields_and_sound_runs_at_new_time(self):
+        self.final_dataset()
+        await self.start(dataset_code="final-code", access_code="show-code")
+        client = self.service.clients[f"{1:064x}"]
+        now = client.clock.start + timedelta(minutes=5)
+        target = client.clock.end - timedelta(minutes=30)
+        await self.room_request("PATCH", "/demo/clock", json={"at": now.isoformat(), "paused": True})
+        self.service.ai.interpret_request = AsyncMock(return_value=AlarmSetInterpretation(
+            record_id="alarm", intent="alarm_set",
+            slots=AlarmSetSlots(target_at=target.isoformat(), alarm_mode="sound", window_minutes=10),
+        ))
+        message = await self.room_request("POST", "/messages", json={
+            "client_message_id": "alarm", "text": "Разбуди в 06:30 звуком",
+        })
+        self.assertEqual(message.status_code, 200, message.text)
+        for revision, (patch, mode, expected_time) in enumerate((
+            ({"volume": 35}, "sound", target),
+            ({"alarmLight": True}, "both", target),
+            ({"time": "07:00"}, "both", client.clock.end),
+        ), start=1):
+            response = await self.room_request("PATCH", "/stay/current", json={"revision": revision, "alarm": patch})
+            self.assertEqual(response.status_code, 200, response.text)
+            wake = response.json()["wakeUp"]
+            self.assertEqual((wake["time"], wake["volume"]), (expected_time.strftime("%H:%M"), 35))
+            self.assertTrue(wake["soundOn"])
+            self.assertEqual(wake["alarmLight"], mode == "both")
+            state = (await self.room_request("GET", "/room/state", params={"at": now.isoformat()})).json()["state"]
+            self.assertEqual(state["alarm"], {"at": expected_time.isoformat(), "mode": mode, "window_minutes": 10})
+            at_wake = (await self.room_request("GET", "/room/state", params={"at": expected_time.isoformat()})).json()
+            self.assertEqual(at_wake["state"]["sound"]["volume"], 35)
+
+    async def test_clock_reports_period_at_boundaries_and_after_rewind(self):
+        result = await self.start(access_code="show-code")
+        self.assertEqual(result.json()["stay"]["clock"]["period"], "evening")
+        client = self.service.clients[f"{1:064x}"]
+        evening, night, morning, day = client.plan.boundaries
+        for at, period in ((night, "night"), (day, "day"), (morning, "morning"), (evening, "evening")):
+            clock = await self.room_request("PATCH", "/demo/clock", json={"at": at.isoformat(), "paused": True})
+            self.assertEqual(clock.json()["period"], period)
+            self.assertEqual((await self.room_request("GET", "/demo/clock")).json()["period"], period)
+
     async def test_clock_rewinds_and_snapshot_does_not_move_time(self):
         self.assertEqual((await self.room_request("GET", "/stay/current")).status_code, 401)
         self.assertEqual((await self.start(access_code="show-code")).status_code, 200)
@@ -415,7 +460,7 @@ class DemoStartTests(DemoFixture):
         self.assertEqual(view["revision"], 1)
 
         second = await self.room_request("POST", "/messages", json={
-            "client_message_id": "two", "text": "ночью поставь 19 градусов",
+            "client_message_id": "two", "text": "поставь на ночь 19 градусов",
         })
         self.assertEqual(second.status_code, 200, second.text)
         self.assertEqual(second.json()["reply"]["text"], "Обновил настройки на ночь.")
@@ -451,6 +496,21 @@ class DemoStartTests(DemoFixture):
         self.assertEqual(response.json()["revision"], 0)
         self.assertIn("Не удалось подтвердить", response.json()["reply"]["text"])
 
+    async def test_morning_request_preserves_night_temperature(self):
+        await self.start(access_code="show-code")
+        client = self.service.clients[f"{1:064x}"]
+        _, night, morning, _ = client.plan.boundaries
+        self.service.ai.interpret_request = AsyncMock(return_value=NumericInterpretation(
+            record_id="dawn", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=22),
+        ))
+        reply = await self.room_request("POST", "/messages", json={
+            "client_message_id": "dawn", "text": "К утру сделай 22 градуса",
+        })
+        self.assertEqual(reply.json()["reply"]["text"], "Обновил настройки на утро.")
+        for at, temperature in ((night, 17.5), (morning, 22)):
+            state = await self.room_request("GET", "/room/state", params={"at": at.isoformat()})
+            self.assertEqual(state.json()["state"]["climate"]["temperature_c"], temperature)
+
     async def test_chat_partial_action_keeps_only_confirmed_fields(self):
         await self.start(access_code="show-code")
         client = self.service.clients[f"{1:064x}"]
@@ -470,3 +530,31 @@ class DemoStartTests(DemoFixture):
         self.assertEqual(response.json()["changes"], {"light": {"brightness": 0}})
         self.assertIn("Часть изменений", response.json()["reply"]["text"])
         self.assertEqual(client.revision, 1)
+
+    async def test_expiry_releases_idle_voice_and_chat_data(self):
+        self.final_dataset()
+        self.run_ttl = timedelta(seconds=1)
+        response = await self.start(access_code="show-code", dataset_code="final-code")
+        self.assertEqual(response.status_code, 200, response.text)
+        key = f"{1:064x}"
+        client = self.service.clients[key]
+        client.recordings["test"] = "Включи свет"
+        client.speech["test.reply"] = b"audio"
+        client.messages.append("test", "Включи свет", "Включил", client.clock.now(), {}, 0)
+        for _ in range(30):
+            if key not in self.service.clients:
+                break
+            await asyncio.sleep(0.05)
+        self.assertNotIn(key, self.service.clients)
+        self.assertNotIn("final-code", self.service.datasets)
+        self.assertEqual((await self.room_request("GET", "/messages")).status_code, 410)
+        self.assertEqual((await self.api.get("/demo/room.js")).status_code, 410)
+
+    async def test_short_dev_stay_leaves_long_slot_available(self):
+        long = self.dataset["stays"][0]
+        short = long | {"record_id": "stay_short", "target_wake_at": "2026-11-21T04:00:00+03:00"}
+        self.dataset["stays"].append(short)
+        for number, record in ((1, "stay_short"), (2, long["record_id"])):
+            response = await self.start(number, access_code="show-code", stay_record_id=record)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(self.service.clients[f"{number:064x}"].room.record_id, record)

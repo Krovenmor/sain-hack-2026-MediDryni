@@ -20,10 +20,10 @@ PERIOD_FIELDS = {
 
 
 class DemoClock:
-    def __init__(self, start: datetime, end: datetime):
-        self.start = start
-        self.end = end
-        self.anchor = start.astimezone(UTC)
+    def __init__(self, boundaries: tuple[datetime, ...]):
+        self.boundaries = boundaries
+        self.start, self.end = boundaries[0], boundaries[-1]
+        self.anchor = self.start.astimezone(UTC)
         self.started = monotonic()
         self.paused = False
 
@@ -31,9 +31,12 @@ class DemoClock:
         elapsed = 0 if self.paused else monotonic() - self.started
         return min(self.anchor + timedelta(seconds=elapsed), self.end.astimezone(UTC)).astimezone(self.start.tzinfo)
 
+    def period_index(self, at: datetime) -> int:
+        return max(i for i, start in enumerate(self.boundaries) if start.timestamp() <= at.timestamp())
+
     def view(self) -> dict:
         now = self.now()
-        return {"now": now, "min": self.start, "max": self.end,
+        return {"now": now, "min": self.start, "max": self.end, "period": PERIODS[self.period_index(now)],
                 "paused": self.paused or now.timestamp() >= self.end.timestamp()}
 
     def update(self, at: datetime | None, paused: bool | None) -> dict:
@@ -101,7 +104,7 @@ def update_periods(steps, boundaries, changes, catalog):
     return steps
 
 
-def alarm_steps(stay, wake_up, alarm_changes, tracks):
+def alarm_steps(stay, wake_up, alarm_changes):
     wake_up = wake_up | alarm_changes
     local_start = stay.check_in_at.astimezone(stay.hotel_timezone)
     local_end = stay.target_wake_at.astimezone(stay.hotel_timezone)
@@ -121,18 +124,13 @@ def alarm_steps(stay, wake_up, alarm_changes, tracks):
             raise HackApiError(422, "alarm_outside_stay")
         at = max(candidates).astimezone(stay.hotel_timezone)
     sound, light = wake_up["soundOn"], wake_up["alarmLight"]
-    if wake_up["enabled"] and not (sound or light):
-        raise HackApiError(422, "alarm_mode_required")
     mode = "both" if sound and light else "sound" if sound else "light"
-    steps = [ScenarioStep(local_start, "alarm", {
-        "at": at.isoformat() if wake_up["enabled"] else None, "mode": mode,
-    })]
-    if "track" in alarm_changes or "volume" in alarm_changes:
-        track = next((entry for entry in tracks.values() if entry.title == wake_up["track"]), None)
-        if track is None:
-            raise HackApiError(422, "invalid_track")
-        if wake_up["enabled"] and sound:
-            steps.append(ScenarioStep(at, "sound", {"track_id": track.track_id, "volume": wake_up["volume"]}))
+    values = {}
+    if "time" in alarm_changes or "enabled" in alarm_changes:
+        values["at"] = at.isoformat() if wake_up["enabled"] else None
+    if "soundOn" in alarm_changes or "alarmLight" in alarm_changes:
+        values["mode"] = mode
+    steps = [ScenarioStep(local_start, "alarm", values)] if values else []
     return wake_up, steps
 
 

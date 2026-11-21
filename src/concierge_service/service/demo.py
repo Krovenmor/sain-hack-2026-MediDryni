@@ -88,17 +88,31 @@ class DemoService:
             self.end_client(key)
 
     def end_client(self, key: str):
-        client = self.clients.pop(key, None)
         self.expired_keys.add(key)
-        # Static-file requests also check expiry while another login may be using the shared plan.
-        if client and not self.start_lock.locked() and not any(
-            c.dataset_code == client.dataset_code for c in self.clients.values()
-        ):
+        self.release_expired_client(key)
+        raise HackApiError(410, "show_ended")
+
+    def release_expired_client(self, key: str):
+        client = self.clients.get(key)
+        if client is None:
+            return
+        remaining = (client.run.expires_at - datetime.now(UTC)).total_seconds()
+        if key not in self.expired_keys and remaining > 0:
+            asyncio.get_running_loop().call_later(remaining, self.release_expired_client, key)
+            return
+        self.expired_keys.add(key)
+        if self.start_lock.locked() or client.write_lock.locked():
+            # In-flight calls may still hold the plan and its dataset.
+            asyncio.get_running_loop().call_later(1, self.release_expired_client, key)
+            return
+        del self.clients[key]
+        if not any(c.dataset_code == client.dataset_code for c in self.clients.values()):
             self.datasets.pop(client.dataset_code, None)
             for cache in (self.plans, self.preferences, self.hints):
                 for entry in [item for item in cache if item[0] == client.dataset_code]:
                     del cache[entry]
-        raise HackApiError(410, "show_ended")
+        if client.run is self.dev_run and remaining <= 0:
+            self.sessions.clear()
 
     async def dataset(self, code: str) -> tuple[ParsedDataset, DatasetIndex]:
         if code not in self.datasets:
@@ -139,6 +153,7 @@ class DemoService:
                     raise HackApiError(404, "stay_not_found")
                 client = await self.allocate(code, stay, parsed, index)
                 self.clients[key] = client
+                self.release_expired_client(key)
             if not client.published:
                 try:
                     await self.publish(key, client)
@@ -181,11 +196,7 @@ class DemoService:
         self.check_expiry(key)
         await self.rooms.load_scenario(session_id=client.room.session_id, steps=steps, token=self.token)
         self.check_expiry(key)
-        stay = client.plan.stay
-        client.clock = DemoClock(
-            stay.check_in_at.astimezone(stay.hotel_timezone),
-            stay.target_wake_at.astimezone(stay.hotel_timezone),
-        )
+        client.clock = DemoClock(client.plan.boundaries)
         client.published = True
 
     def get_client_session(self, key: str) -> DemoClient:
@@ -207,13 +218,26 @@ class DemoService:
                 period: period_devices(fields) for period, fields in periods.items()
             })
             alarm_changes = client.alarm_changes | alarm
+            replaced_alarm = set()
+            if alarm:
+                wake = client.current()["wakeUp"] | alarm
+                if wake["enabled"] and not (wake["soundOn"] or wake["alarmLight"]):
+                    raise HackApiError(422, "alarm_mode_required")
+                # Room API packs two UI fields into each of "at" and "mode".
+                if {"time", "enabled"} & alarm.keys():
+                    replaced_alarm.add("at")
+                    alarm_changes.update(time=wake["time"], enabled=wake["enabled"])
+                if {"soundOn", "alarmLight"} & alarm.keys():
+                    replaced_alarm.add("mode")
+                    alarm_changes.update(soundOn=wake["soundOn"], alarmLight=wake["alarmLight"])
             # A subsequent explicit edit replaces earlier live actions for the same field in that period.
             live_steps = []
             for step in client.live_steps:
-                period = PERIODS[self.period_index(client.plan, step.at)]
+                period = PERIODS[client.clock.period_index(step.at)]
                 replaced = period_devices(periods.get(period, {})).get(step.device_id, {})
-                values = {field: value for field, value in step.values.items()
-                          if field not in replaced and not (alarm and step.device_id == "alarm")}
+                if step.device_id == "alarm":
+                    replaced = replaced_alarm
+                values = {field: value for field, value in step.values.items() if field not in replaced}
                 if values:
                     live_steps.append(replace(step, values=values))
             await self.save_schedule(client, period_changes, alarm_changes, tuple(live_steps))
@@ -228,25 +252,35 @@ class DemoService:
         wake_up = plan.view["wakeUp"]
         overrides = []
         if alarm_changes:
-            wake_up, overrides = alarm_steps(plan.stay, wake_up, alarm_changes, index.tracks_by_id)
+            wake_up, overrides = alarm_steps(plan.stay, wake_up, alarm_changes)
         steps = merge_steps(steps, (*overrides, *live_steps), catalog)
         samples = list(plan.samples)
         for step in live_steps:
-            period = self.period_index(plan, step.at)
+            period = client.clock.period_index(step.at)
             samples[period] = max(samples[period], step.at, key=datetime.timestamp)
-        view = stay_view(plan.stay, steps, index, tuple(samples))
         alarm = {}
         for step in steps:
             if step.device_id == "alarm":
                 alarm.update(step.values)
         alarm_at = alarm.get("at")
         at = datetime.fromisoformat(alarm_at).astimezone(plan.stay.hotel_timezone) if alarm_at else None
+        sound = {}
+        if "track" in alarm_changes:
+            track = next((t for t in index.tracks_by_id.values() if t.title == alarm_changes["track"]), None)
+            if track is None:
+                raise HackApiError(422, "invalid_track")
+            sound["track_id"] = track.track_id
+        if "volume" in alarm_changes:
+            sound["volume"] = alarm_changes["volume"]
+        if sound and at and alarm.get("mode") in ("both", "sound"):
+            steps = merge_steps(steps, [ScenarioStep(at, "sound", sound)], catalog)
+        view = stay_view(plan.stay, steps, index, tuple(samples))
         view["wakeUp"] = wake_up | {
             "enabled": at is not None,
             "time": at.strftime("%H:%M") if at else wake_up["time"],
             "dawnMinutes": max(0, int((at.timestamp() - plan.samples[2].timestamp()) / 60)) if at else 0,
         }
-        if alarm.get("mode") and (at or any(step.device_id == "alarm" for step in live_steps)):
+        if alarm.get("mode") and (at or any(step.device_id == "alarm" and "mode" in step.values for step in live_steps)):
             view["wakeUp"].update(soundOn=alarm["mode"] in ("sound", "both"), alarmLight=alarm["mode"] in ("light", "both"))
         return steps, view
 
@@ -260,10 +294,6 @@ class DemoService:
         client.personal_steps = steps
         client.personal_view = view
         client.revision += 1
-
-    @staticmethod
-    def period_index(plan, at):
-        return max(i for i, start in enumerate(plan.boundaries) if start.timestamp() <= at.timestamp())
 
     async def record_voice(self, key: str, client: DemoClient, audio: bytes, filename: str, content_type: str):
         if self.voice is None:
@@ -300,7 +330,7 @@ class DemoService:
 
             plan = client.plan
             period = requested_period(text)
-            current = self.period_index(plan, received_at)
+            current = client.clock.period_index(received_at)
             selected = PERIODS.index(period) if period else current
             at = plan.boundaries[selected] if selected > current else received_at
             state = (await self.room_state(client, at))["state"]
@@ -413,7 +443,10 @@ class DemoService:
     async def free_room(self, stay: Stay, index: DatasetIndex) -> RoomSession:
         used = {c.room.record_id for c in self.clients.values() if c.run.stage == "dev" and c.room}
         duration = stay.target_wake_at.astimezone(UTC) - stay.check_in_at.astimezone(UTC)
-        for dev in index.stays_by_id.values():
+        candidates = sorted(index.stays_by_id.values(), key=lambda stay: (
+            stay.target_wake_at.astimezone(UTC) - stay.check_in_at.astimezone(UTC)
+        ))
+        for dev in candidates:
             if dev.record_id in used:
                 continue
             if dev.record_id not in self.sessions:

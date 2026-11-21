@@ -81,6 +81,11 @@
   stroke: white;
   stroke-width: 1.5px;
 }
+.period[data-current="true"] .period-outline rect {
+  stroke: #ffd08b;
+  stroke-width: 2px;
+}
+.home-day { color: #ffd08b; font-size: .875rem; }
 .period-inner {
   display: flex;
   flex: 1;

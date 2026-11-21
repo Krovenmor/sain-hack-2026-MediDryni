@@ -8,12 +8,11 @@ import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
 import { demoError, demoRequest } from "./data/demoApi.js";
-import { DemoClock } from "./components/DemoClock.jsx";
+import { periodIds, settingsPatch } from "./data/staySettings.js";
+import { DemoClock, useDemoClock } from "./components/DemoClock.jsx";
 import { Scenario } from "./screens/scenario/Scenario.jsx";
 import { Welcome } from "./screens/home/Welcome.jsx";
 import { Navigation } from "./components/Navigation.jsx";
-
-const periodIds = ["evening", "night", "morning", "day"];
 
 export function App({ stay: initialStay }) {
   const [stay, setStay] = useState(initialStay);
@@ -23,8 +22,10 @@ export function App({ stay: initialStay }) {
   const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState(0);
   const [screen, setScreen] = useState("home");
+  const roomClock = useDemoClock(initialStay.clock, screen === "home" || screen === "scenario");
   const periodId = periodIds[selected];
-  const dirty = Object.keys(periodChanges).length > 0 || Object.keys(alarmChanges).length > 0;
+  const patch = settingsPatch(stay, periodChanges, alarmChanges);
+  const dirty = Object.keys(patch.periods).length > 0 || Object.keys(patch.alarm).length > 0;
   const draft = screen === "manual" || screen === "light";
   const periods = stay.periods.map((period, index) => {
     const { kelvin, brightness, previousBrightness, ...changes } = periodChanges[periodIds[index]] ?? {};
@@ -63,11 +64,7 @@ export function App({ stay: initialStay }) {
     setSaving(true);
     setNotice("");
     try {
-      const periods = Object.fromEntries(Object.entries(periodChanges).map(([period, fields]) => {
-        const { previousBrightness, ...values } = fields;
-        return [period, values];
-      }));
-      setStay(await demoRequest("/stay/current", "PATCH", { revision: stay.revision, periods, alarm: alarmChanges }));
+      setStay(await demoRequest("/stay/current", "PATCH", patch));
       discard();
       setNotice("Настройки сохранены.");
     } catch (error) {
@@ -117,7 +114,7 @@ export function App({ stay: initialStay }) {
         )}
         {screen === "scenario" && (
           <>
-            <DemoClock initial={stay.clock} />
+            <DemoClock {...roomClock} />
             <Scenario periods={stay.periods} selected={selected} onSelect={setSelected} wakeUp={stay.wakeUp} />
           </>
         )}
@@ -128,7 +125,8 @@ export function App({ stay: initialStay }) {
             saving={saving} onShowSmart={() => navigate("light")} />
         )}
         {screen === "home" && (
-          <Welcome stay={stay} selected={selected} setSelected={setSelected} showPlan={() => navigate("scenario")}
+          <Welcome stay={stay} currentPeriod={periodIds.indexOf(roomClock.clock.period)}
+            selected={selected} setSelected={setSelected} showPlan={() => navigate("scenario")}
             showManual={() => navigate("manual")} showSmart={() => navigate("light")} />
         )}
       </main>
