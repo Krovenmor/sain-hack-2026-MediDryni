@@ -58,7 +58,7 @@ class RoomApiError(Exception):
 
 class RoomApi(Protocol):
     async def create_session(
-        self, *, record_id: str, kind: RoomKind, token: str
+        self, *, record_id: str, kind: RoomKind, token: str, run_id: UUID | None = None
     ) -> RoomSession: ...
 
     async def load_scenario(

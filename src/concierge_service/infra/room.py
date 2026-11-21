@@ -85,18 +85,20 @@ class RoomApiAdapter:
         self._client = client
 
     async def create_session(
-        self, *, record_id: str, kind: RoomKind, token: str
+        self, *, record_id: str, kind: RoomKind, token: str, run_id: UUID | None = None
     ) -> RoomSession:
         payload = await self._request(
             "POST",
             "/room/session",
             _SessionPayload,
             token=token,
-            json={"record_id": record_id, "kind": kind},
+            json={"record_id": record_id, "kind": kind, **({"run_id": str(run_id)} if run_id else {})},
             retry=True,
         )
         if payload.record_id != record_id or payload.kind != kind:
             raise RoomApiError("session does not match the record")
+        if run_id is not None and payload.run_id != run_id:
+            raise RoomApiError("session does not match the run")
         return payload.to_session()
 
     async def load_scenario(

@@ -16,6 +16,7 @@ from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.ports.ai import AiAgent
+from concierge_service.service.demo import DemoService
 from concierge_service.service.run_case import RunCase
 from shared.telemetry import log_event
 
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 class Container:
     run_case: RunCase
     http_client: httpx.AsyncClient
+    demo: DemoService
 
     async def aclose(self) -> None:
         await self.http_client.aclose()
@@ -49,11 +51,12 @@ def build_container(settings: Settings, *, ai_agent: AiAgent | None = None) -> C
             detail="LLM_BASE_URL, LLM_API_KEY and LLM_MODEL are not set; using the mock AI, "
             "every request will be refused",
         )
+        ai_agent = MockAiAgent()
     run_case = RunCase(
         hack_api,
         room_api=room_api,
         sleep_planner=SleepPlanner(),
-        ai_agent=ai_agent if ai_agent is not None else MockAiAgent(),
+        ai_agent=ai_agent,
         conversation_store_factory=InMemoryConversationStore,
     )
-    return Container(run_case=run_case, http_client=client)
+    return Container(run_case, client, DemoService(hack_api, room_api, ai_agent, settings.team_token))

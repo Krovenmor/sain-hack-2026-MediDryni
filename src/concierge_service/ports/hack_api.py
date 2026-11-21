@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal, Protocol
+from uuid import UUID
 
 from concierge_service.ports.dataset import ParsedDataset
 
@@ -15,6 +18,18 @@ class HackApi(Protocol):
         The token is forwarded unchanged.
         """
         ...
+
+
+@dataclass(frozen=True)
+class DemoRun:
+    run_id: UUID
+    dataset_id: str
+    expires_at: datetime
+    stage: Literal["dev", "final"]
+
+
+class DemoHackApi(HackApi, Protocol):
+    async def create_demo_run(self, *, stage: Literal["dev", "final"], token: str) -> DemoRun: ...
 
 
 class HackApiError(Exception):

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import date, time
+from typing import Literal
+from uuid import UUID
 
 import httpx
-from pydantic import ValidationError
+from pydantic import AwareDatetime, BaseModel, ValidationError
 
 from concierge_service.domain import dataset as domain
 from concierge_service.infra.dataset_schemas import (
@@ -14,15 +16,41 @@ from concierge_service.infra.dataset_schemas import (
     SleepPreferencesPayload,
     UserPayload,
 )
+from concierge_service.infra.wire import Identifier
 from concierge_service.infra.http_retry import request_with_retry
 from concierge_service.ports.dataset import DatasetSource, ParsedDataset
-from concierge_service.ports.hack_api import HackApiError
+from concierge_service.ports.hack_api import DemoRun, HackApiError
+
+
+class _DemoRunPayload(BaseModel):
+    run_id: UUID
+    dataset_id: Identifier
+    expires_at: AwareDatetime
 
 
 class HackApiAdapter:
     def __init__(self, *, base_url: str, client: httpx.AsyncClient) -> None:
         self._base_url = base_url.rstrip("/")
         self._client = client
+
+    async def create_demo_run(self, *, stage: Literal["dev", "final"], token: str) -> DemoRun:
+        body = {"case": 2, "stage": "final"} if stage == "final" else {"case": 2}
+        try:
+            response = await self._client.post(
+                f"{self._base_url}/runs", json=body,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        except httpx.HTTPError:
+            raise HackApiError(503, "unavailable") from None
+        if response.status_code == 410:
+            raise HackApiError(410, "show_ended")
+        if response.status_code != 201:
+            raise HackApiError(503, f"{stage}_run_unavailable")
+        try:
+            payload = _DemoRunPayload.model_validate_json(response.content)
+            return DemoRun(payload.run_id, payload.dataset_id, payload.expires_at, stage)
+        except ValidationError:
+            raise HackApiError(502, "invalid_response") from None
 
     async def get_case2_data(
         self, *, dataset_code: str | None, token: str
