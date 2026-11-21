@@ -32,6 +32,7 @@ from shared.telemetry import log_event
 
 
 _SYSTEM_PROMPT = load_prompt("interpret_request.md")
+_DEMO_TIMING_PROMPT = load_prompt("demo_timing.md")
 logger = logging.getLogger(__name__)
 
 _PAST = re.compile(r"вчера|\bд(?:ень|ня|ней) назад\b|как (?:тогда|в тот раз)|как .*заезд|прошл\w* заезд")
@@ -70,8 +71,11 @@ def request_payload(item: RequestContext) -> dict[str, object]:
 
 
 def request_messages(payload: dict[str, object]) -> list[dict[str, str]]:
+    system = _SYSTEM_PROMPT
+    if "periods" in cast(JsonObject, payload["request"]):
+        system += "\n\n" + _DEMO_TIMING_PROMPT
     return [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system},
         {
             "role": "user",
             "content": compact_json(payload),

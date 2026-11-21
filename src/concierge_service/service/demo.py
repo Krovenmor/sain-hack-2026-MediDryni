@@ -11,7 +11,9 @@ from concierge_service.domain.dataset import DatasetIndex, Request, Stay, Uttera
 from concierge_service.domain.device_catalog import DeviceCatalog
 from concierge_service.domain.scenario import ScenarioStep
 from concierge_service.domain.sleep import ResolvedPreferences, SleepPlanner, resolve_bedtime
-from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceHints, ProfileContext, RequestContext
+from concierge_service.ports.ai import (
+    AiAgent, AiAgentError, ClockTime, Delay, PreferenceHints, ProfileContext, RequestContext,
+)
 from concierge_service.ports.dataset import ParsedDataset
 from concierge_service.ports.hack_api import DemoHackApi, DemoRun, HackApiError
 from concierge_service.ports.room import RoomApi, RoomApiError, RoomSession
@@ -50,7 +52,7 @@ class DemoClient:
     recordings: dict[str, str] = field(default_factory=dict)
     speech: dict[str, bytes] = field(default_factory=dict)
     speech_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    live_steps: tuple[ScenarioStep, ...] = ()
+    point_steps: tuple[ScenarioStep, ...] = ()
     personal_steps: tuple[ScenarioStep, ...] | None = None
     personal_view: dict | None = None
 
@@ -277,21 +279,21 @@ class DemoService:
                 if {"soundOn", "alarmLight"} & alarm.keys():
                     replaced_alarm.add("mode")
                     alarm_changes.update(soundOn=wake["soundOn"], alarmLight=wake["alarmLight"])
-            # A subsequent explicit edit replaces earlier live actions for the same field in that period.
-            live_steps = []
-            for step in client.live_steps:
+            # A manual edit replaces point changes to the same field in that period.
+            point_steps = []
+            for step in client.point_steps:
                 period = PERIODS[client.clock.period_index(step.at)]
                 replaced = period_devices(periods.get(period, {})).get(step.device_id, {})
                 if step.device_id == "alarm":
                     replaced = replaced_alarm
                 values = {field: value for field, value in step.values.items() if field not in replaced}
                 if values:
-                    live_steps.append(replace(step, values=values))
-            await self.save_schedule(client, period_changes, alarm_changes, tuple(live_steps))
+                    point_steps.append(replace(step, values=values))
+            await self.save_schedule(client, period_changes, alarm_changes, tuple(point_steps))
             self.check_expiry(key)
             return client.current()
 
-    def schedule(self, client, period_changes, alarm_changes, live_steps):
+    def schedule(self, client, period_changes, alarm_changes, point_steps):
         _, index = self.datasets[client.dataset_code]
         plan = client.plan
         catalog = DeviceCatalog(index.device_fields_by_device)
@@ -300,9 +302,9 @@ class DemoService:
         overrides = []
         if alarm_changes:
             wake_up, overrides = alarm_steps(plan.stay, wake_up, alarm_changes)
-        steps = merge_steps(steps, (*overrides, *live_steps), catalog)
+        steps = merge_steps(steps, (*overrides, *point_steps), catalog)
         samples = list(plan.samples)
-        for step in live_steps:
+        for step in point_steps:
             period = client.clock.period_index(step.at)
             samples[period] = max(samples[period], step.at, key=datetime.timestamp)
         alarm = {}
@@ -327,17 +329,17 @@ class DemoService:
             "time": at.strftime("%H:%M") if at else wake_up["time"],
             "dawnMinutes": max(0, int((at.timestamp() - plan.samples[2].timestamp()) / 60)) if at else 0,
         }
-        if alarm.get("mode") and (at or any(step.device_id == "alarm" and "mode" in step.values for step in live_steps)):
+        if alarm.get("mode") and (at or any(step.device_id == "alarm" and "mode" in step.values for step in point_steps)):
             view["wakeUp"].update(soundOn=alarm["mode"] in ("sound", "both"), alarmLight=alarm["mode"] in ("light", "both"))
         return steps, view
 
-    async def save_schedule(self, client, periods, alarm, live_steps):
-        steps, view = self.schedule(client, periods, alarm, live_steps)
+    async def save_schedule(self, client, periods, alarm, point_steps):
+        steps, view = self.schedule(client, periods, alarm, point_steps)
         scenario = shifted_steps(replace(client.plan, steps=steps), client.room) if client.run.stage == "dev" else steps
         await self.rooms.load_scenario(session_id=client.room.session_id, steps=scenario, token=self.token)
         client.period_changes = periods
         client.alarm_changes = alarm
-        client.live_steps = live_steps
+        client.point_steps = point_steps
         client.personal_steps = steps
         client.personal_view = view
         client.revision += 1
@@ -397,34 +399,50 @@ class DemoService:
                 conversation=client.messages.context(), preference_hints=self.hints[client.dataset_code, stay.user_id],
             )
 
-            scheduled_period = None
+            scheduled_reply = None
 
             async def execute(interpreted):
-                nonlocal scheduled_period
-                period = interpreted.timing
-                selected = current if period == "now" else PERIODS.index(period)
+                nonlocal scheduled_reply
+                timing = interpreted.timing
+                period = None
+                at = None
                 self.check_expiry(key)
-                if selected < current:
-                    return "past_period", {}
+                if isinstance(timing, (ClockTime, Delay)):
+                    at = client.clock.requested_time(timing, received_at)
+                    if at is None:
+                        return "unavailable_time", {}
+                elif timing != "now":
+                    selected = PERIODS.index(timing)
+                    if selected < current:
+                        return "past_period", {}
+                    if selected > current:
+                        period = timing
+                        at = plan.boundaries[selected]
                 target = record
-                if selected > current:
-                    at = plan.boundaries[selected]
+                if at is not None:
                     snapshot = await self.room_state(client, at)
                     target = replace(record, at=at, initial_state=snapshot["state"])
                 patches = plan_request(target, interpreted, context, self.preferences[client.dataset_code, stay.user_id],
                                        index.device_fields_by_device)
                 if not patches:
+                    if at is not None:
+                        scheduled_reply = "К этому времени нужная настройка уже предусмотрена."
                     return "unchanged", {}
                 self.check_expiry(key)
                 for patch in patches:
                     alarm_at = patch.values.get("at") if patch.device_id == "alarm" else None
                     if alarm_at and datetime.fromisoformat(alarm_at).timestamp() > client.clock.end.timestamp():
                         raise ActionPlanError("invalid_value")
-                if selected > current:
+                if at is not None:
                     applied = {patch.device_id: dict(patch.values) for patch in patches}
-                    periods = combine_period_changes(client.period_changes, {period: applied})
+                    periods = client.period_changes
+                    steps = client.point_steps
+                    if period:
+                        periods = combine_period_changes(periods, {period: applied})
+                    else:
+                        steps += tuple(ScenarioStep(at, device, values) for device, values in applied.items())
                     try:
-                        await self.save_schedule(client, periods, client.alarm_changes, client.live_steps)
+                        await self.save_schedule(client, periods, client.alarm_changes, steps)
                     except RoomApiError as exc:
                         if exc.http_status == 410:
                             raise
@@ -433,15 +451,19 @@ class DemoService:
                         if exc.code == "empty_period":
                             raise ActionPlanError("invalid_value") from exc
                         raise
-                    scheduled_period = period
+                    if period:
+                        label = {"evening": "вечер", "night": "ночь", "morning": "утро", "day": "день"}[period]
+                        scheduled_reply = f"Обновил настройки на {label}."
+                    else:
+                        when = at.strftime("%H:%M:%S" if at.second else "%H:%M")
+                        if at.date() != received_at.date():
+                            when = f"{at:%d.%m} в {when}"
+                        scheduled_reply = f"Запланировал изменение на {when}."
                     return "applied", applied
                 return await self.apply_live(client, received_at, patches)
 
             _, reply, applied = await self.request_handler.handle_interactive(record, context, execute)
-            if scheduled_period:
-                label = {"evening": "вечер", "night": "ночь", "morning": "утро", "day": "день"}[scheduled_period]
-                reply = f"Обновил настройки на {label}."
-            return client.messages.append(message_id, text, reply, received_at, applied, client.revision)
+            return client.messages.append(message_id, text, scheduled_reply or reply, received_at, applied, client.revision)
 
     async def apply_live(self, client: DemoClient, at: datetime, patches):
         applied = {}
@@ -476,9 +498,9 @@ class DemoService:
 
     def record_live_changes(self, client, at, applied):
         if applied:
-            live = (*client.live_steps, *(ScenarioStep(at, device, values) for device, values in applied.items()))
+            live = (*client.point_steps, *(ScenarioStep(at, device, values) for device, values in applied.items()))
             steps, view = self.schedule(client, client.period_changes, client.alarm_changes, live)
-            client.live_steps, client.personal_steps, client.personal_view = live, steps, view
+            client.point_steps, client.personal_steps, client.personal_view = live, steps, view
             client.revision += 1
 
     @staticmethod

@@ -6,6 +6,7 @@ from time import monotonic
 from concierge_service.domain.dataset import JSONScalar
 from concierge_service.domain.device_catalog import DeviceCatalog
 from concierge_service.domain.scenario import ScenarioStep
+from concierge_service.ports.ai import ClockTime, Delay
 from concierge_service.ports.hack_api import HackApiError
 
 
@@ -33,6 +34,30 @@ class DemoClock:
 
     def period_index(self, at: datetime) -> int:
         return max(i for i, start in enumerate(self.boundaries) if start.timestamp() <= at.timestamp())
+
+    def requested_time(self, timing: ClockTime | Delay, received_at: datetime) -> datetime | None:
+        start, end = received_at.astimezone(UTC), self.end.astimezone(UTC)
+        zone = self.start.tzinfo
+        if isinstance(timing, Delay):
+            if timing.after_seconds > (end - start).total_seconds():
+                return None
+            return (start + timedelta(seconds=timing.after_seconds)).astimezone(zone)
+
+        local = received_at.astimezone(zone)
+        day = timing.on_date or local.date()
+        wall = time.fromisoformat(timing.at)
+        while local.date() <= day <= self.end.date():
+            requested = datetime.combine(day, wall)
+            # A repeated local time has two instants; a skipped local time has none.
+            for fold in (0, 1):
+                instant = requested.replace(tzinfo=zone, fold=fold).astimezone(UTC)
+                candidate = instant.astimezone(zone)
+                if start <= instant <= end and candidate.replace(tzinfo=None) == requested:
+                    return candidate
+            if timing.on_date or requested >= local.replace(tzinfo=None) or day == self.end.date():
+                break
+            day += timedelta(days=1)
+        return None
 
     def view(self) -> dict:
         now = self.now()

@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI
@@ -16,12 +17,29 @@ from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
 from concierge_service.ports.ai import (
-    AbsoluteAmount, AlarmSetInterpretation, AlarmSetSlots, EmptySlots, NoSlotsInterpretation,
+    AbsoluteAmount, AlarmSetInterpretation, AlarmSetSlots, ClockTime, Delay, EmptySlots, NoSlotsInterpretation,
     NumericInterpretation, RelativeAmount,
 )
 from concierge_service.service.demo import DemoService
+from concierge_service.service.demo_settings import DemoClock
 from concierge_service.transport.http.demo import install_demo
 from test_concierge_stage1 import dataset_payload
+
+
+class DemoClockTimingTests(unittest.TestCase):
+    def test_skipped_and_repeated_local_times(self):
+        zone = ZoneInfo("Europe/Berlin")
+        start = datetime(2026, 3, 28, 22, tzinfo=zone)
+        spring = DemoClock((start, datetime(2026, 3, 29, 8, tzinfo=zone)))
+        self.assertIsNone(spring.requested_time(ClockTime(at="02:30"), start))
+        before_jump = datetime(2026, 3, 29, 1, 55, tzinfo=zone)
+        after_jump = spring.requested_time(Delay(after_seconds=600), before_jump)
+        self.assertEqual(after_jump.isoformat(), "2026-03-29T03:05:00+02:00")
+
+        first_hour = datetime(2026, 10, 25, 2, 45, tzinfo=zone, fold=0)
+        autumn = DemoClock((first_hour, datetime(2026, 10, 25, 7, tzinfo=zone)))
+        repeated = autumn.requested_time(ClockTime(at="02:15"), first_hour)
+        self.assertEqual(repeated.isoformat(), "2026-10-25T02:15:00+01:00")
 
 
 class DemoFixture(unittest.IsolatedAsyncioTestCase):
@@ -556,6 +574,68 @@ class DemoStartTests(DemoFixture):
         self.assertEqual((await self.room_request("GET", "/messages", 2)).json()["items"], [])
         conflict = await self.room_request("POST", "/messages", json=first | {"text": "другой текст"})
         self.assertEqual(conflict.status_code, 409)
+
+    async def test_clock_time_and_delay_publish_rewindable_point_changes(self):
+        self.final_dataset()
+        for number, code in ((1, "case2-test-v1"), (2, "final-code")):
+            await self.start(number, dataset_code=code, access_code="show-code")
+            client = self.service.clients[f"{number:064x}"]
+            at = client.clock.end.replace(hour=1, minute=38, second=9)
+            later = at + timedelta(seconds=5527)
+            before = at - timedelta(seconds=1)
+            await self.room_request("PATCH", "/demo/clock", number, json={
+                "at": client.clock.start.isoformat(), "paused": True,
+            })
+            self.service.ai.interpret_request = AsyncMock(side_effect=[
+                NumericInterpretation(record_id="first", intent="warmer", timing=ClockTime(at="01:38:09"),
+                                      slots=AbsoluteAmount(mode="absolute", value=21)),
+                NumericInterpretation(record_id="next", intent="cooler", timing=Delay(after_seconds=5527),
+                                      slots=RelativeAmount(mode="relative", amount=1)),
+            ])
+            first = {"client_message_id": "first", "text": "В 01:38:09 поставь 21 градус"}
+            r = await self.room_request("POST", "/messages", number, json=first)
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIn("01:38:09", r.json()["reply"]["text"])
+            self.assertEqual((await self.room_request("POST", "/messages", number, json=first)).json(), r.json())
+            await self.room_request("PATCH", "/demo/clock", number, json={"at": at.isoformat(), "paused": True})
+            r = await self.room_request("POST", "/messages", number, json={
+                "client_message_id": "next", "text": "Через час 32 минуты и 7 секунд сделай на градус прохладнее",
+            })
+            self.assertEqual(r.json()["revision"], 2)
+            self.assertIn(later.strftime("%H:%M:%S"), r.json()["reply"]["text"])
+            for when, expected in ((later, 20), (before, 17.5), (at, 21), (later - timedelta(seconds=1), 21)):
+                await self.room_request("PATCH", "/demo/clock", number, json={"at": when.isoformat(), "paused": True})
+                state = (await self.room_request("GET", "/room/state", number)).json()["state"]
+                self.assertEqual(state["climate"]["temperature_c"], expected)
+            self.assertFalse(self.room_actions)
+            self.assertEqual(self.service.ai.interpret_request.await_count, 2)
+
+    async def test_timing_respects_stay_end_and_failed_publication(self):
+        await self.start(access_code="show-code")
+        client = self.service.clients[f"{1:064x}"]
+        now = client.clock.end - timedelta(seconds=30)
+        await self.room_request("PATCH", "/demo/clock", json={"at": now.isoformat(), "paused": True})
+        for i, timing in enumerate((
+            ClockTime(at="06:00", on_date=now.date()), Delay(after_seconds=31), ClockTime(at="12:12"),
+            Delay(after_seconds=30), Delay(after_seconds=30),
+        )):
+            self.fail_publish = i == 3
+            key = f"timed-{i}"
+            self.service.ai.interpret_request = AsyncMock(return_value=NumericInterpretation(
+                record_id=key, intent="warmer", timing=timing, slots=AbsoluteAmount(mode="absolute", value=21),
+            ))
+            r = await self.room_request("POST", "/messages", json={"client_message_id": key, "text": "Сделай теплее"})
+            self.assertEqual(r.status_code, 200, r.text)
+            result = r.json()
+            if i < 4:
+                self.assertEqual(result["revision"], 0)
+                self.assertFalse(result["changes"])
+                self.assertIn("Выберите время" if i < 3 else "Не удалось подтвердить", result["reply"]["text"])
+            else:
+                self.assertIn("07:00", result["reply"]["text"])
+                self.assertEqual(result["revision"], 1)
+        self.assertEqual(len(self.scenarios), 2)
+        self.assertFalse(self.room_actions)
 
     async def test_clarification_and_period_reference_do_not_trigger_early_action(self):
         await self.start(access_code="show-code")
