@@ -84,13 +84,14 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 "conversation": [old.model_dump(exclude_none=True)],
             })
             return completion(json.dumps({
-                "record_id": "request_1", "intent": "warmer",
+                "record_id": "request_1", "intent": "warmer", "timing": "night",
                 "slots": {"mode": "relative", "amount": None},
             }))
 
         result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
         self.assertEqual(len(calls), 1)
         self.assertEqual(result.intent, "warmer")
+        self.assertEqual(result.timing, "night")
         self.assertIsNone(result.slots.amount)
 
     async def test_preserves_valid_slots_and_special_intents(self):
@@ -144,6 +145,37 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 agent = self.make_agent(lambda request: completion(output))
                 with self.assertRaisesRegex(AiAgentError, "^invalid_response$"):
                     await agent.interpret_request(request_context("Теплее"), timeout_s=1)
+
+    async def test_missing_or_unknown_demo_timing_is_not_a_live_command(self):
+        item = request_context("Сделай теплее, когда лягу")
+        item = replace(item, request=item.request | {"periods": {"night": {"start": AT}}})
+        for fields in (
+            {}, {"timing": "tomorrow"}, {"timing": {"at": "24:15"}},
+            {"timing": {"after_seconds": -2}}, {"timing": {"after_seconds": True}},
+            {"timing": {"at": "08:00", "after_seconds": 300}},
+            {"timing": {"at": "08:00", "on_date": "2026-02-30"}},
+        ):
+            output = {"record_id": "request_1", "intent": "warmer",
+                      "slots": {"mode": "relative", "amount": 1}, **fields}
+            agent = self.make_agent(lambda request: completion(json.dumps(output)))
+            with self.assertRaisesRegex(AiAgentError, "invalid_response"):
+                await agent.interpret_request(item, timeout_s=1)
+
+    async def test_demo_model_can_return_clock_times_and_delays_in_one_call(self):
+        for timing in ({"at": "01:38:09"}, {"at": "21:06", "on_date": "2026-11-21"}, {"after_seconds": 5527}):
+            item = request_context("Измени яркость")
+            item = replace(item, request=item.request | {"periods": {}})
+            calls = []
+
+            def handle(request):
+                calls.append(request)
+                self.assertIn("after_seconds", json.loads(request.content)["messages"][0]["content"])
+                return completion(json.dumps({"record_id": "request_1", "intent": "brighter",
+                                              "timing": timing, "slots": {"mode": "absolute", "value": 60}}))
+
+            result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
+            self.assertEqual(result.timing.model_dump(mode="json", exclude_none=True), timing)
+            self.assertEqual(len(calls), 1)
 
     async def test_retry_and_dialogue_reference(self):
         item = replace(

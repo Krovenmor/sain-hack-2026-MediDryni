@@ -1,0 +1,194 @@
+.sky { position: absolute; z-index: -1; inset: 0; overflow: hidden; pointer-events: none; }
+.orb { position: absolute; height: auto; }
+.orb-four {
+  width: 122.64%;
+  left: 52.88%;
+  top: 2.68rem;
+  rotate: -95.81deg;
+  animation: float-four 13s ease-in-out infinite alternate;
+}
+.orb-five {
+  width: 204.85%;
+  right: 39.4%;
+  top: 25.5rem;
+  rotate: 24.59deg;
+  opacity: .5;
+  animation: float-five 17s ease-in-out infinite alternate;
+}
+@keyframes float-four {
+  0% { translate: 0 0; }
+  54% { translate: -.7rem 1.05rem; }
+  100% { translate: .6rem 1.75rem; }
+}
+@keyframes float-five {
+  0% { translate: 0 0; }
+  46% { translate: .85rem -.45rem; }
+  100% { translate: .3rem -1.6rem; }
+}
+
+.arrival { padding-top: clamp(.65rem, calc(9dvh - 2.5rem), 2.625rem); }
+.guest, .demo-time time {
+  display: block;
+  font: 400 clamp(2.25rem, 11.65vw, 3rem)/1.4 "Train One", sans-serif;
+  text-shadow: 0 0 5px white;
+}
+.guest { overflow-wrap: anywhere; letter-spacing: normal; }
+.demo-time {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: clamp(.75rem, calc(14dvh - 4.25rem), 4.56rem);
+  min-height: clamp(3.5rem, 8dvh, 4.5rem);
+  translate: 0 clamp(-.625rem, calc(2rem - 2.7dvh), 0rem);
+}
+.demo-time time { letter-spacing: -.05em; }
+.time-rule { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(90deg); }
+.demo-time span { width: 36.3%; font-size: clamp(1.5rem, 7.75vw, 2rem); line-height: 1.15; text-shadow: var(--glow); }
+.demo-time-slider { position: relative; margin-inline: .55rem .9rem; }
+.demo-time-slider input {
+  --range-height: clamp(2rem, 5.7dvh, 3.5rem);
+  display: block;
+  appearance: none;
+  width: 100%;
+  height: var(--range-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(white, white) center / 100% 1px no-repeat;
+  touch-action: none;
+  cursor: ew-resize;
+}
+.demo-time-slider input:focus-visible { outline: 1px solid #fad28e; outline-offset: 2px; }
+.demo-time-slider input:disabled { opacity: .55; cursor: default; }
+.demo-time-slider input::-webkit-slider-runnable-track { height: 100%; background: transparent; }
+.demo-time-slider input::-moz-range-track { height: 100%; background: transparent; }
+.demo-time-slider input::-webkit-slider-thumb {
+  appearance: none;
+  width: 13px;
+  height: var(--range-height);
+  background: url("../../../assets/manual-slider-thumb.svg") center calc(50% + 6px) no-repeat;
+}
+.demo-time-slider input::-moz-range-thumb {
+  width: 13px;
+  height: var(--range-height);
+  border: 0;
+  border-radius: 0;
+  background: url("../../../assets/manual-slider-thumb.svg") center calc(50% + 6px) no-repeat;
+}
+.demo-time-slider [role="status"] {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  font: .75rem/1.2 "Montserrat", sans-serif;
+}
+.room { margin-top: clamp(.9rem, calc(12dvh - 5.4rem), 2.8rem); }
+.room-heading { align-items: end; margin-bottom: .8rem; }
+.room-heading h2 { font-size: clamp(1.85rem, 9.7vw, 2.5rem); line-height: 1.28; text-shadow: var(--glow); }
+.room-heading .pill { min-height: 2.125rem; padding-inline: .85rem; white-space: nowrap; }
+.pill.dark { color: white; background: var(--wine); border: 1px solid #100005; text-shadow: var(--glow); }
+.periods {
+  --card-gap: clamp(.35rem, 2.43vw, .625rem);
+  display: flex;
+  container-type: inline-size;
+  gap: var(--card-gap);
+  margin-right: .1875rem;
+  padding-block: clamp(.25rem, .8dvh, .5rem);
+}
+.period {
+  flex: 0 0 18.2%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  min-width: 0;
+  min-height: clamp(13rem, calc(37dvh - 1rem), 21.625rem);
+  padding: 1px;
+  border-radius: 1.25rem;
+  transition: flex-basis 280ms var(--ease), background-color 280ms ease;
+}
+.period-outline {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.period-outline rect {
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  fill: none;
+  stroke: white;
+  stroke-width: 1.5px;
+}
+.period[data-current="true"] .period-outline rect {
+  stroke: #ffd08b;
+  stroke-width: 2px;
+}
+.period-inner {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  border-radius: calc(1.25rem - 1px);
+}
+.period.expanded { flex-basis: calc(63.6% - 2 * var(--card-gap)); background: rgb(255 255 255 / 30%); }
+.period-toggle { position: absolute; inset: 0; width: 100%; padding: 0; font-size: clamp(.95rem, 4.85vw, 1.25rem); text-shadow: var(--glow); border-radius: inherit; }
+.period.expanded .period-toggle { inset: 0 0 auto; height: 4.25rem; color: transparent; text-shadow: none; }
+.period:not(.expanded) .period-toggle { padding-bottom: .9rem; }
+.period-content {
+  /* Hidden panels still reserve their expanded height so the row stays stable. */
+  width: calc(63.6cqw - 2 * var(--card-gap) - 2px);
+  flex: 1;
+  padding: .75rem .45rem .45rem .875rem;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  visibility: hidden;
+}
+.expanded .period-content { opacity: 1; visibility: visible; transition: opacity 160ms ease-out 95ms; }
+.period-content h3 { font-size: 2.25rem; font-weight: bold; line-height: 1.28; }
+.card-rule { display: block; width: calc(100% - .45rem); height: 1px; margin: .45rem 0 clamp(.4rem, 1.75dvh, 1rem); }
+.settings {
+  font-family: "Montserrat", sans-serif;
+  font-size: 1rem;
+  line-height: clamp(1.2rem, 2.75dvh, 1.55rem);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.settings li + li { margin-top: .25rem; }
+.period-actions { display: grid; gap: .45rem; margin-top: auto; padding-top: clamp(.45rem, 1.75dvh, 1rem); }
+.period-actions .pill { min-height: 1.95rem; }
+.period-actions .dark { min-height: 2.125rem; }
+
+@media (max-width: 360px) {
+  .room-heading { flex-wrap: wrap; }
+  .room-heading h2 { font-size: 1.85rem; }
+  .room-heading .pill { padding-inline: .5rem; font-size: .875rem; }
+  .period-content { padding-left: .6rem; }
+  .settings { font-size: .92rem; }
+}
+
+@media (max-height: 680px) {
+  .arrival h1 { font-size: clamp(1.55rem, 7vw, 2rem); }
+  .guest, .demo-time time { font-size: clamp(1.9rem, 8.8vw, 2.55rem); line-height: 1.2; }
+  .demo-time { min-height: 3rem; }
+  .room-heading { margin-bottom: .5rem; }
+  .period-content h3 { font-size: 1.75rem; }
+  .period.expanded .period-toggle { height: 2.8rem; }
+  .card-rule { margin-block: .3rem .45rem; }
+  .settings { line-height: 1.2; }
+  .period-actions { padding-top: .45rem; }
+}
+
+@media (max-height: 600px) {
+  .arrival { padding-top: .55rem; }
+  .demo-time { margin-top: .75rem; }
+  .room { margin-top: .5rem; }
+  .period { min-height: 12rem; }
+  .period-content { padding-top: .5rem; }
+  .settings { font-size: .85rem; }
+}

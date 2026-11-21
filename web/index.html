@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+  <title>Вход</title>
+  <style id="entry-style">
+    body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; color: #202020; }
+    main { margin: 12vh auto; max-width: 22rem; padding: 1.5rem; }
+    label, input, select, button { display: block; width: 100%; box-sizing: border-box; }
+    input, select, button { padding: .65rem; margin: .25rem 0 1rem; font: inherit; }
+    [hidden] { display: none; }
+  </style>
+</head>
+<body>
+  <div id="root">
+    <main>
+      <h1>Вход</h1>
+      <form id="entry">
+        <label id="access-label">Код показа<input type="text" id="access" required maxlength="256" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+        <label>Код набора<input id="dataset" required maxlength="128" autocapitalize="none" spellcheck="false"></label>
+        <label id="choose" hidden>Заезд<select id="stay"></select></label>
+        <button>Продолжить</button>
+      </form>
+      <p role="status" id="status"></p>
+    </main>
+  </div>
+  <script type="module" src="/login.js"></script>
+</body>
+</html>
