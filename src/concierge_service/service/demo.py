@@ -1,6 +1,7 @@
 """One interactive show per process, with independent simulator rooms."""
 
 import asyncio
+import secrets
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -71,7 +72,9 @@ class DemoService:
         self.hints: dict[tuple[str, str], PreferenceHints | None] = {}
         self.token = team_token
         self.dev_run: DemoRun | None = None
-        self.expired_keys: set[str] = set()
+        self.closed_dev_run: DemoRun | None = None
+        # A dev key has one successor even when two tabs reset it concurrently.
+        self.expired_keys: dict[str, str | None] = {}
         self.clients: dict[str, DemoClient] = {}
         self.datasets: dict[str, tuple[ParsedDataset, DatasetIndex]] = {}
         self.preferences: dict[tuple[str, str], ResolvedPreferences] = {}
@@ -81,17 +84,43 @@ class DemoService:
         # client never takes this lock. Failed publications can reuse the same room.
         self.start_lock = asyncio.Lock()
 
-    def check_expiry(self, key: str):
-        if key in self.expired_keys:
-            raise HackApiError(410, "show_ended")
+    def expire_if_needed(self, key: str):
         client = self.clients.get(key)
-        if client and datetime.now(UTC) >= client.run.expires_at:
-            self.end_client(key)
+        if client and key not in self.expired_keys:
+            old_dev_run = client.run.stage == "dev" and (
+                client.run is self.closed_dev_run or client.run is not self.dev_run
+            )
+            if old_dev_run or datetime.now(UTC) >= client.run.expires_at:
+                self.end_client(key, client)
 
-    def end_client(self, key: str):
-        self.expired_keys.add(key)
+    def check_expiry(self, key: str):
+        self.expire_if_needed(key)
+        if key in self.expired_keys:
+            raise self.expiry_error(key)
+
+    def expiry_error(self, key: str) -> HackApiError:
+        return HackApiError(410, "dev_session_expired" if self.expired_keys[key] else "show_ended")
+
+    def mark_expired(self, key: str, client: DemoClient):
+        if key not in self.expired_keys:
+            self.expired_keys[key] = secrets.token_hex(32) if client.run.stage == "dev" else None
+
+    def end_client(self, key: str, client: DemoClient):
+        if client.run is self.dev_run:
+            self.closed_dev_run = client.run
+        self.mark_expired(key, client)
         self.release_expired_client(key)
-        raise HackApiError(410, "show_ended")
+
+    def reset_dev(self, key: str) -> str:
+        self.expire_if_needed(key)
+        if key not in self.expired_keys:
+            if key in self.clients:
+                raise HackApiError(409, "session_active")
+            raise HackApiError(401, "unauthorized")
+        successor = self.expired_keys[key]
+        if successor is None:
+            raise self.expiry_error(key)
+        return successor
 
     def release_expired_client(self, key: str):
         client = self.clients.get(key)
@@ -101,7 +130,7 @@ class DemoService:
         if key not in self.expired_keys and remaining > 0:
             asyncio.get_running_loop().call_later(remaining, self.release_expired_client, key)
             return
-        self.expired_keys.add(key)
+        self.mark_expired(key, client)
         if self.start_lock.locked() or client.write_lock.locked():
             # In-flight calls may still hold the plan and its dataset.
             asyncio.get_running_loop().call_later(1, self.release_expired_client, key)
@@ -160,7 +189,7 @@ class DemoService:
                     await self.publish(key, client)
                 except RoomApiError as exc:
                     if exc.http_status == 410:
-                        self.end_client(key)
+                        self.end_client(key, client)
                     self.check_expiry(key)
                     raise
             return client.ready()
@@ -171,14 +200,31 @@ class DemoService:
             run = await self.hack.create_demo_run(stage="final", token=self.token)
             return DemoClient(code, plan, run)
 
-        if self.dev_run is None:
-            self.dev_run = await self.hack.create_demo_run(stage="dev", token=self.token)
-        if datetime.now(UTC) >= self.dev_run.expires_at:
-            raise HackApiError(410, "show_ended")
-        _, dev_index = await self.dataset(self.dev_run.dataset_id)
-        room = await self.free_room(stay, dev_index)
+        previous = self.dev_run
+        run = await self.ensure_dev_run()
+        _, dev_index = await self.dataset(run.dataset_id)
+        try:
+            room = await self.free_room(stay, dev_index)
+        except RoomApiError as exc:
+            if exc.http_status != 410:
+                raise
+            self.closed_dev_run = run
+            if run is not previous:
+                raise
+            # The stand closed the shared run before its advertised expiry.
+            run = await self.ensure_dev_run()
+            _, dev_index = await self.dataset(run.dataset_id)
+            room = await self.free_room(stay, dev_index)
         plan = await self.plan_for_stay(code, stay, parsed, index)
-        return DemoClient(code, plan, self.dev_run, room)
+        return DemoClient(code, plan, run, room)
+
+    async def ensure_dev_run(self) -> DemoRun:
+        run = self.dev_run
+        if run is None or run is self.closed_dev_run or datetime.now(UTC) >= run.expires_at:
+            self.dev_run = await self.hack.create_demo_run(stage="dev", token=self.token)
+            self.sessions.clear()
+            self.closed_dev_run = None
+        return self.dev_run
 
     async def publish(self, key: str, client: DemoClient):
         self.check_expiry(key)
@@ -379,7 +425,9 @@ class DemoService:
                     periods = combine_period_changes(client.period_changes, {period: applied})
                     try:
                         await self.save_schedule(client, periods, client.alarm_changes, client.live_steps)
-                    except RoomApiError:
+                    except RoomApiError as exc:
+                        if exc.http_status == 410:
+                            raise
                         return "room_error", {}
                     except HackApiError as exc:
                         if exc.code == "empty_period":
@@ -410,7 +458,9 @@ class DemoService:
                 )
                 if snapshot.at != stand_at:
                     break
-            except RoomApiError:
+            except RoomApiError as exc:
+                if exc.http_status == 410:
+                    raise
                 break
             confirmed = {field: patch.values[field] for field, value in values.items()
                          if patch_matches_state(DevicePatch(patch.device_id, {field: value}), snapshot.state)}
@@ -456,7 +506,7 @@ class DemoService:
         return {"at": at, "state": state}
 
     async def free_room(self, stay: Stay, index: DatasetIndex) -> RoomSession:
-        used = {c.room.record_id for c in self.clients.values() if c.run.stage == "dev" and c.room}
+        used = {c.room.record_id for c in self.clients.values() if c.run is self.dev_run and c.room}
         duration = stay.target_wake_at.astimezone(UTC) - stay.check_in_at.astimezone(UTC)
         candidates = sorted(index.stays_by_id.values(), key=lambda stay: (
             stay.target_wake_at.astimezone(UTC) - stay.check_in_at.astimezone(UTC)

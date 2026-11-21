@@ -1,3 +1,7 @@
+// The mounted screen and its pending edits belong to this particular room.
+const roomKey = localStorage.getItem("demo.client");
+let returningToEntry = false;
+
 export async function demoRequest(path, method = "GET", body, { audio = false, signal } = {}) {
   const multipart = body instanceof FormData;
   const response = await fetch(`/api/v1${path}`, {
@@ -5,7 +9,7 @@ export async function demoRequest(path, method = "GET", body, { audio = false, s
     signal,
     cache: "no-store",
     headers: {
-      Authorization: `Bearer ${localStorage.getItem("demo.client")}`,
+      Authorization: `Bearer ${roomKey}`,
       ...(body === undefined || multipart ? {} : { "Content-Type": "application/json" }),
     },
     body: multipart || body === undefined ? body : JSON.stringify(body),
@@ -16,6 +20,10 @@ export async function demoRequest(path, method = "GET", body, { audio = false, s
     const error = new Error("Запрос не выполнен");
     error.status = response.status;
     error.code = result.detail?.code;
+    if (!returningToEntry && error.status === 410 && ["dev_session_expired", "show_ended"].includes(error.code)) {
+      returningToEntry = true;
+      window.location.reload();
+    }
     throw error;
   }
   return result;

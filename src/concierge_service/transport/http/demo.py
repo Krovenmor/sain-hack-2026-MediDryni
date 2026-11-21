@@ -120,6 +120,11 @@ class DemoAccess:
             self.failures = {k: v for k, v in self.failures.items() if v[1] > now}
             self.failures[ip] = (count + 1, end)
             raise HTTPException(403, detail={"code": "access_denied"})
+        return self.grant(key)
+
+    def grant(self, key):
+        if key in self.cookies:
+            return self.cookies[key]
         ticket = secrets.token_urlsafe(32)
         self.cookies[key] = ticket
         self.tickets[ticket] = key
@@ -151,12 +156,27 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
             response = JSONResponse({"detail": {"code": exc.code}}, exc.status_code, headers=_PRIVATE)
         except (RoomApiError, DatasetError, SleepPlanError):
             response = JSONResponse({"detail": {"code": "invalid_room_or_plan"}}, 502, headers=_PRIVATE)
-        response.set_cookie(_COOKIE, ticket, httponly=True, secure=True, samesite="strict", path="/demo")
+        if response.status_code != 410:
+            response.set_cookie(_COOKIE, ticket, httponly=True, secure=True, samesite="strict", path="/demo")
         return response
 
-    async def get_client_session(key: Annotated[str, Depends(client_key)]) -> DemoClient:
+    @app.post("/api/v1/demo/reset")
+    async def reset(key: Annotated[str, Depends(client_key)]):
         with demo_errors():
-            return service.get_client_session(key)
+            successor = service.reset_dev(key)
+        access.grant(successor)
+        return JSONResponse({"client_key": successor}, headers=_PRIVATE)
+
+    async def get_client_session(key: Annotated[str, Depends(client_key)]):
+        with demo_errors():
+            client = service.get_client_session(key)
+            try:
+                yield client
+            except RoomApiError as exc:
+                if exc.http_status == 410:
+                    service.end_client(key, client)
+                    raise service.expiry_error(key) from exc
+                raise
 
     @app.get("/api/v1/stay/current")
     async def current(client: Annotated[DemoClient, Depends(get_client_session)]):
@@ -165,10 +185,9 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
     @app.patch("/api/v1/stay/current")
     async def save_settings(payload: SettingsPatch, key: Annotated[str, Depends(client_key)],
                             client: Annotated[DemoClient, Depends(get_client_session)]):
-        with demo_errors():
-            return await service.update_settings(
-                key, client, payload.revision, payload.periods, payload.alarm.model_dump(exclude_unset=True),
-            )
+        return await service.update_settings(
+            key, client, payload.revision, payload.periods, payload.alarm.model_dump(exclude_unset=True),
+        )
 
     @app.get("/api/v1/demo/clock")
     async def read_clock(client: Annotated[DemoClient, Depends(get_client_session)]):
@@ -177,45 +196,39 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
     @app.patch("/api/v1/demo/clock")
     async def set_clock(payload: ClockPatch, key: Annotated[str, Depends(client_key)],
                         client: Annotated[DemoClient, Depends(get_client_session)]):
-        with demo_errors():
-            return await service.update_clock(key, client, payload.at, payload.paused)
+        return await service.update_clock(key, client, payload.at, payload.paused)
 
     @app.get("/api/v1/room/state")
     async def room_state(client: Annotated[DemoClient, Depends(get_client_session)],
                          at: Annotated[AwareDatetime | None, Query()] = None):
-        with demo_errors():
-            return await service.room_state(client, at)
+        return await service.room_state(client, at)
 
     @app.get("/api/v1/messages")
     async def read_messages(client: Annotated[DemoClient, Depends(get_client_session)],
                             limit: Annotated[int, Query(ge=1, le=100)] = 30,
                             before: Annotated[Identifier | None, Query()] = None):
-        with demo_errors():
-            return client.messages.page(limit, before)
+        return client.messages.page(limit, before)
 
     @app.post("/api/v1/messages")
     async def send_message(payload: MessagePost, key: Annotated[str, Depends(client_key)],
                            client: Annotated[DemoClient, Depends(get_client_session)]):
-        with demo_errors():
-            text = payload.text
-            if payload.recording_id is not None:
-                text = client.recordings.get(payload.recording_id)
-                if text is None:
-                    raise HackApiError(404, "recording_not_found")
-            return await service.send_message(key, client, payload.client_message_id, text)
+        text = payload.text
+        if payload.recording_id is not None:
+            text = client.recordings.get(payload.recording_id)
+            if text is None:
+                raise HackApiError(404, "recording_not_found")
+        return await service.send_message(key, client, payload.client_message_id, text)
 
     @app.post("/api/v1/voice/recordings")
     async def record_voice(request: Request, key: Annotated[str, Depends(client_key)],
                            client: Annotated[DemoClient, Depends(get_client_session)]):
         audio = await read_audio(request)
-        with demo_errors():
-            return await service.record_voice(key, client, *audio)
+        return await service.record_voice(key, client, *audio)
 
     @app.get("/api/v1/messages/{reply_id}/speech")
     async def speech(reply_id: Identifier, key: Annotated[str, Depends(client_key)],
                      client: Annotated[DemoClient, Depends(get_client_session)]):
-        with demo_errors():
-            audio = await service.reply_speech(key, client, reply_id)
+        audio = await service.reply_speech(key, client, reply_id)
         return Response(audio, media_type="audio/mpeg", headers=_PRIVATE)
 
     class PrivateBuild(StaticFiles):
@@ -226,8 +239,8 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
             else:
                 try:
                     service.check_expiry(access.tickets[cookie])
-                except HackApiError:
-                    response = JSONResponse({"detail": "show_ended"}, 410, headers=_PRIVATE)
+                except HackApiError as exc:
+                    response = JSONResponse({"detail": {"code": exc.code}}, 410, headers=_PRIVATE)
                 else:
                     response = await self.get_response(self.get_path(scope), scope)
                     response.headers.update(_PRIVATE)

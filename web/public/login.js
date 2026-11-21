@@ -21,6 +21,10 @@ function askCode(needed) {
   access.required = needed;
 }
 
+window.addEventListener("storage", event => {
+  if (event.key === "demo.client" && event.oldValue && event.oldValue !== event.newValue) location.reload();
+});
+
 const errors = {
   access_denied: "Проверьте код показа.",
   too_many_attempts: "Слишком много попыток. Попробуйте через минуту.",
@@ -39,16 +43,28 @@ async function start(stayId) {
   status.textContent = "Открываем заезд…";
   try {
     const code = dataset.value.trim();
-    const key = navigator.locks
+    let key = navigator.locks
       ? await navigator.locks.request("demo.client", browserKey)
       : browserKey();
-    const response = await fetch("/api/v1/run_client", {
+    const enter = () => fetch("/api/v1/run_client", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ dataset_code: code, access_code: access.value || undefined,
                              stay_record_id: stayId || undefined }),
     });
-    const result = await response.json();
+    let response = await enter();
+    let result = await response.json();
+    if (response.status === 410 && result.detail?.code === "dev_session_expired") {
+      status.textContent = "Время демо истекло. Открываем новый заезд…";
+      response = await fetch("/api/v1/demo/reset", { method: "POST", headers: { Authorization: `Bearer ${key}` } });
+      result = await response.json();
+      if (response.ok) {
+        if (localStorage.getItem("demo.client") === key) localStorage.setItem("demo.client", result.client_key);
+        key = localStorage.getItem("demo.client");
+        response = await enter();
+        result = await response.json();
+      }
+    }
     if (!response.ok) {
       const reason = result.detail?.code;
       if (reason === "access_denied") {

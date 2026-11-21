@@ -41,6 +41,7 @@ class DemoFixture(unittest.IsolatedAsyncioTestCase):
         self.failed_action_devices = set()
         self.fail_publish = False
         self.closed_rooms = set()
+        self.closed_runs = set()
         self.until = timedelta(hours=18)
         self.check_in = datetime(2027, 1, 20, 12, tzinfo=UTC)
         upstream = httpx.AsyncClient(transport=httpx.MockTransport(self.stand))
@@ -87,11 +88,14 @@ class DemoFixture(unittest.IsolatedAsyncioTestCase):
                 dataset_id = self.final_dataset_id
             else:
                 self.assertEqual(body, {"case": 2})
+                self.run_id = str(uuid4())
                 run_id, dataset_id = self.run_id, "case2-test-v1"
             return httpx.Response(201, json={"run_id": run_id, "dataset_id": dataset_id,
                                             "expires_at": (datetime.now(UTC) + self.run_ttl).isoformat()})
         if path == "/room/session":
             run_id = body["run_id"]
+            if run_id in self.closed_runs:
+                return httpx.Response(410)
             self.assertIn(run_id, self.final_runs | {self.run_id})
             if self.fail_session:
                 return httpx.Response(400)
@@ -99,7 +103,7 @@ class DemoFixture(unittest.IsolatedAsyncioTestCase):
             record = body["record_id"]
             final = run_id in self.final_runs
             dataset_id = self.final_dataset_id if final else "case2-test-v1"
-            room_key = (run_id, record) if final else record
+            room_key = (run_id, record)
             sid = self.room_ids.setdefault(room_key, str(uuid4()))
             return httpx.Response(200, json={
                 "session_id": sid, "run_id": run_id, "room_id": sid, "team_id": "team",
@@ -230,7 +234,7 @@ class DemoStartTests(DemoFixture):
         self.datasets["guest-dataset"] = guest_data
         response = await self.start(access_code="show-code", dataset_code="guest-dataset")
         self.assertEqual(response.json()["stay"]["stay_record_id"], "guest_stay")
-        self.assertEqual(set(self.room_ids), {"stay_1"})
+        self.assertEqual(set(self.room_ids), {(self.run_id, "stay_1")})
         self.assertEqual(self.calls.count("/case/2/getData"), 2)
         self.assertEqual((await self.start()).status_code, 409)
 
@@ -316,6 +320,74 @@ class DemoStartTests(DemoFixture):
         final.run = replace(final.run, expires_at=datetime.now(UTC) - timedelta(seconds=1))
         self.assertEqual((await self.api.get("/demo/room.js")).status_code, 410)
         self.assertEqual((await self.start(2, dataset_code="final-code")).json()["detail"]["code"], "show_ended")
+
+    async def test_reset_renews_shared_dev_run_and_isolates_successor_rooms(self):
+        self.dataset["stays"].append(self.dataset["stays"][0] | {"record_id": "stay_2"})
+        args = {"access_code": "show-code", "stay_record_id": "stay_1"}
+        for n in (1, 2):
+            self.assertEqual((await self.start(n, **args)).status_code, 200)
+        self.assertEqual((await self.room_request("POST", "/demo/reset", 1)).status_code, 409)
+        self.assertEqual((await self.room_request("POST", "/demo/reset", 3)).status_code, 401)
+        old = self.service.clients[f"{1:064x}"]
+        old.messages.append("hello", "Привет", "Добрый вечер", old.clock.now(), {}, 0)
+        old.recordings["old-recording"] = "Привет"
+        await self.room_request("PATCH", "/stay/current", json={"revision": 0, "periods": {"night": {"temperature": 21}}})
+        await self.room_request("PATCH", "/demo/clock", json={"at": old.clock.end.isoformat(), "paused": True})
+        self.service.dev_run = replace(old.run, expires_at=datetime.now(UTC) - timedelta(seconds=1))
+        for c in self.service.clients.values():
+            c.run = self.service.dev_run
+        expired = await self.room_request("GET", "/demo/clock")
+        self.assertEqual((expired.status_code, expired.json()["detail"]["code"]), (410, "dev_session_expired"))
+        results = await asyncio.gather(*(self.room_request("POST", "/demo/reset", n) for n in (1, 2, 1)))
+        self.assertEqual([r.status_code for r in results], [200] * 3)
+        keys = [r.json()["client_key"] for r in results]
+        self.assertEqual(keys[0], keys[2])
+        self.assertNotEqual(keys[0], keys[1])
+        opened = await asyncio.gather(*(self.start(int(k, 16), stay_record_id="stay_1") for k in keys))
+        self.assertEqual([r.status_code for r in opened], [200] * 3)
+        self.assertEqual(self.calls.count("/runs"), 2)
+        self.assertEqual(self.calls.count("/room/session"), 4)
+        self.assertEqual(len(self.scenarios), 5)  # Four bootstraps and the old manual edit.
+        first, second = (self.service.clients[k] for k in keys[:2])
+        self.assertNotEqual(first.run.run_id, old.run.run_id)
+        self.assertEqual(first.run.run_id, second.run.run_id)
+        self.assertEqual(len({old.room.session_id, first.room.session_id, second.room.session_id}), 3)
+        self.assertEqual(first.revision, 0)
+        self.assertFalse(first.clock.paused)
+        self.assertLess(first.clock.now() - first.clock.start, timedelta(seconds=5))
+        self.assertFalse(first.messages.messages)
+        self.assertFalse(first.recordings)
+        self.assertEqual((await self.room_request("POST", "/messages", json={
+            "client_message_id": "stale", "text": "Сделай теплее",
+        })).status_code, 410)
+
+    async def test_new_visitor_can_replace_a_closed_run_before_old_clients_return(self):
+        self.dataset["stays"].append(self.dataset["stays"][0] | {"record_id": "stay_2"})
+        args = {"access_code": "show-code", "stay_record_id": "stay_1"}
+        await self.start(**args)
+        self.closed_runs.add(self.run_id)
+        self.assertEqual((await self.start(2, **args)).status_code, 200)
+        stale = await self.room_request("GET", "/stay/current")
+        self.assertEqual((stale.status_code, stale.json()["detail"]["code"]), (410, "dev_session_expired"))
+        key = (await self.room_request("POST", "/demo/reset")).json()["client_key"]
+        self.assertEqual((await self.start(int(key, 16), stay_record_id="stay_1")).status_code, 200)
+        self.assertEqual(self.calls.count("/runs"), 2)
+
+    async def test_upstream_410_recovers_only_the_dev_room(self):
+        self.final_dataset()
+        await self.start(access_code="show-code")
+        await self.start(2, access_code="show-code", dataset_code="final-code")
+        dev, final = (self.service.clients[f"{n:064x}"] for n in (1, 2))
+        self.closed_rooms.update(str(c.room.session_id) for c in (dev, final))
+        for n, code in ((1, "dev_session_expired"), (2, "show_ended")):
+            r = await self.room_request("PATCH", "/stay/current", n, json={
+                "revision": 0, "periods": {"night": {"temperature": 21}},
+            })
+            self.assertEqual((r.status_code, r.json()["detail"]["code"]), (410, code))
+        self.assertEqual((await self.room_request("POST", "/demo/reset", 2)).status_code, 410)
+        reset = await self.room_request("POST", "/demo/reset", 1)
+        self.assertEqual((await self.start(int(reset.json()["client_key"], 16))).status_code, 200)
+        self.assertEqual(self.calls.count("/runs"), 3)
 
     async def test_final_stand_closes_pending_room(self):
         self.final_dataset()
