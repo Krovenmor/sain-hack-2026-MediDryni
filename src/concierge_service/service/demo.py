@@ -4,16 +4,21 @@ import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 
-from concierge_service.domain.dataset import DatasetIndex, Stay, build_dataset_index
+from concierge_service.domain.action_planner import ActionPlanError, DevicePatch, patch_matches_state
+from concierge_service.domain.dataset import DatasetIndex, Request, Stay, Utterance, build_dataset_index
 from concierge_service.domain.device_catalog import DeviceCatalog
 from concierge_service.domain.scenario import ScenarioStep
 from concierge_service.domain.sleep import ResolvedPreferences, SleepPlanner, resolve_bedtime
-from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceHints, ProfileContext
+from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceHints, ProfileContext, RequestContext
 from concierge_service.ports.dataset import ParsedDataset
 from concierge_service.ports.hack_api import DemoHackApi, DemoRun, HackApiError
 from concierge_service.ports.room import RoomApi, RoomApiError, RoomSession
-from concierge_service.service.demo_settings import DemoClock, alarm_steps, merge_steps, update_periods
+from concierge_service.service.demo_messages import DemoMessages, requested_period
+from concierge_service.service.demo_settings import (
+    PERIODS, DemoClock, alarm_steps, combine_period_changes, merge_steps, period_devices, update_periods,
+)
 from concierge_service.service.preference_resolver import resolve_preferences
+from concierge_service.service.request_handler import RequestHandler
 
 
 @dataclass
@@ -37,6 +42,8 @@ class DemoClient:
     write_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     period_changes: dict = field(default_factory=dict)
     alarm_changes: dict = field(default_factory=dict)
+    messages: DemoMessages = field(default_factory=DemoMessages)
+    live_steps: tuple[ScenarioStep, ...] = ()
     personal_steps: tuple[ScenarioStep, ...] | None = None
     personal_view: dict | None = None
 
@@ -52,6 +59,8 @@ class DemoService:
         self.hack = hack
         self.rooms = rooms
         self.ai = ai
+        self.request_handler = RequestHandler(rooms, ai)
+        self.hints: dict[tuple[str, str], PreferenceHints | None] = {}
         self.token = team_token
         self.dev_run: DemoRun | None = None
         self.expired_keys: set[str] = set()
@@ -79,7 +88,7 @@ class DemoService:
             c.dataset_code == client.dataset_code for c in self.clients.values()
         ):
             self.datasets.pop(client.dataset_code, None)
-            for cache in (self.plans, self.preferences):
+            for cache in (self.plans, self.preferences, self.hints):
                 for entry in [item for item in cache if item[0] == client.dataset_code]:
                     del cache[entry]
         raise HackApiError(410, "show_ended")
@@ -187,35 +196,169 @@ class DemoService:
             if not (periods or alarm):
                 return client.current()
 
-            _, index = self.datasets[client.dataset_code]
-            plan = client.plan
-            period_changes = client.period_changes | {
-                period: client.period_changes.get(period, {}) | fields for period, fields in periods.items()
-            }
+            period_changes = combine_period_changes(client.period_changes, {
+                period: period_devices(fields) for period, fields in periods.items()
+            })
             alarm_changes = client.alarm_changes | alarm
-            catalog = DeviceCatalog(index.device_fields_by_device)
-            steps = update_periods(plan.steps, plan.boundaries, period_changes, catalog)
-            wake_up = plan.view["wakeUp"]
-            overrides = []
-            if alarm_changes:
-                wake_up, overrides = alarm_steps(plan.stay, wake_up, alarm_changes, index.tracks_by_id)
-            steps = merge_steps(steps, overrides, catalog)
-            view = stay_view(plan.stay, steps, index, plan.samples)
-            view["wakeUp"] = wake_up
-            if (alarm_step := next((step for step in overrides if step.device_id == "alarm"), None)):
-                alarm_at = alarm_step.values["at"]
-                dawn = plan.samples[2]
-                minutes = (datetime.fromisoformat(alarm_at).timestamp() - dawn.timestamp()) / 60 if alarm_at else 0
-                view["wakeUp"] = wake_up | {"dawnMinutes": max(0, int(minutes))}
-            scenario = shifted_steps(replace(plan, steps=steps), client.room) if client.run.stage == "dev" else steps
-            await self.rooms.load_scenario(session_id=client.room.session_id, steps=scenario, token=self.token)
+            # A subsequent explicit edit replaces earlier live actions for the same field in that period.
+            live_steps = []
+            for step in client.live_steps:
+                period = PERIODS[self.period_index(client.plan, step.at)]
+                replaced = period_devices(periods.get(period, {})).get(step.device_id, {})
+                values = {field: value for field, value in step.values.items()
+                          if field not in replaced and not (alarm and step.device_id == "alarm")}
+                if values:
+                    live_steps.append(replace(step, values=values))
+            await self.save_schedule(client, period_changes, alarm_changes, tuple(live_steps))
             self.check_expiry(key)
-            client.period_changes = period_changes
-            client.alarm_changes = alarm_changes
-            client.personal_steps = steps
-            client.personal_view = view
-            client.revision += 1
             return client.current()
+
+    def schedule(self, client, period_changes, alarm_changes, live_steps):
+        _, index = self.datasets[client.dataset_code]
+        plan = client.plan
+        catalog = DeviceCatalog(index.device_fields_by_device)
+        steps = update_periods(plan.steps, plan.boundaries, period_changes, catalog)
+        wake_up = plan.view["wakeUp"]
+        overrides = []
+        if alarm_changes:
+            wake_up, overrides = alarm_steps(plan.stay, wake_up, alarm_changes, index.tracks_by_id)
+        steps = merge_steps(steps, (*overrides, *live_steps), catalog)
+        samples = list(plan.samples)
+        for step in live_steps:
+            period = self.period_index(plan, step.at)
+            samples[period] = max(samples[period], step.at, key=datetime.timestamp)
+        view = stay_view(plan.stay, steps, index, tuple(samples))
+        alarm = {}
+        for step in steps:
+            if step.device_id == "alarm":
+                alarm.update(step.values)
+        alarm_at = alarm.get("at")
+        at = datetime.fromisoformat(alarm_at).astimezone(plan.stay.hotel_timezone) if alarm_at else None
+        view["wakeUp"] = wake_up | {
+            "enabled": at is not None,
+            "time": at.strftime("%H:%M") if at else wake_up["time"],
+            "dawnMinutes": max(0, int((at.timestamp() - plan.samples[2].timestamp()) / 60)) if at else 0,
+        }
+        if alarm.get("mode") and (at or any(step.device_id == "alarm" for step in live_steps)):
+            view["wakeUp"].update(soundOn=alarm["mode"] in ("sound", "both"), alarmLight=alarm["mode"] in ("light", "both"))
+        return steps, view
+
+    async def save_schedule(self, client, periods, alarm, live_steps):
+        steps, view = self.schedule(client, periods, alarm, live_steps)
+        scenario = shifted_steps(replace(client.plan, steps=steps), client.room) if client.run.stage == "dev" else steps
+        await self.rooms.load_scenario(session_id=client.room.session_id, steps=scenario, token=self.token)
+        client.period_changes = periods
+        client.alarm_changes = alarm
+        client.live_steps = live_steps
+        client.personal_steps = steps
+        client.personal_view = view
+        client.revision += 1
+
+    @staticmethod
+    def period_index(plan, at):
+        return max(i for i, start in enumerate(plan.boundaries) if start.timestamp() <= at.timestamp())
+
+    async def send_message(self, key, client, message_id, text):
+        received_at = client.clock.now()
+        async with client.write_lock:
+            self.check_expiry(key)
+            if cached := client.messages.cached(message_id, text):
+                return cached
+
+            plan = client.plan
+            period = requested_period(text)
+            current = self.period_index(plan, received_at)
+            selected = PERIODS.index(period) if period else current
+            at = plan.boundaries[selected] if selected > current else received_at
+            state = (await self.room_state(client, at))["state"]
+            parsed, index = self.datasets[client.dataset_code]
+            stay = plan.stay
+            source = parsed.source
+            record = Request(message_id, stay.user_id, stay.record_id, at, state, (Utterance(received_at, text),))
+            context = RequestContext(
+                profile=self.profile(parsed, index, stay.user_id),
+                request={"record_id": message_id, "user_id": stay.user_id, "stay_id": stay.record_id,
+                         "at": at.isoformat(), "initial_state": state,
+                         "utterances": [{"role": "user", "at": received_at.isoformat(), "text": text}]},
+                stay=source.stays_by_id[stay.record_id], intents=source.intents,
+                conversation=client.messages.context(), preference_hints=self.hints[client.dataset_code, stay.user_id],
+            )
+
+            async def execute(patches):
+                self.check_expiry(key)
+                if selected < current:
+                    raise ActionPlanError("invalid_value")
+                for patch in patches:
+                    alarm_at = patch.values.get("at") if patch.device_id == "alarm" else None
+                    if alarm_at and datetime.fromisoformat(alarm_at).timestamp() > client.clock.end.timestamp():
+                        raise ActionPlanError("invalid_value")
+                if selected > current:
+                    applied = {patch.device_id: dict(patch.values) for patch in patches}
+                    periods = combine_period_changes(client.period_changes, {period: applied})
+                    try:
+                        await self.save_schedule(client, periods, client.alarm_changes, client.live_steps)
+                    except RoomApiError:
+                        return "room_error", {}
+                    except HackApiError as exc:
+                        if exc.code == "empty_period":
+                            raise ActionPlanError("invalid_value") from exc
+                        raise
+                    return "applied", applied
+                return await self.apply_live(client, at, patches)
+
+            outcome, reply, applied = await self.request_handler.handle_interactive(
+                record, context, index.device_fields_by_device,
+                self.preferences[client.dataset_code, stay.user_id], execute,
+            )
+            if selected < current and outcome == "invalid_value":
+                reply = "Этот период уже прошёл. Уточните, когда изменить настройку."
+            elif selected > current and outcome == "applied":
+                label = {"evening": "вечер", "night": "ночь", "morning": "утро", "day": "день"}[period]
+                reply = f"Обновил настройки на {label}."
+            return client.messages.append(message_id, text, reply, received_at, applied, client.revision)
+
+    async def apply_live(self, client: DemoClient, at: datetime, patches):
+        applied = {}
+        stand_at = self.room_time(client, at)
+        complete = False
+        for patch in patches:
+            values = dict(patch.values)
+            if patch.device_id == "alarm" and values.get("at"):
+                values["at"] = self.room_time(client, datetime.fromisoformat(values["at"])).isoformat()
+            room_patch = DevicePatch(patch.device_id, values)
+            try:
+                snapshot = await self.rooms.apply_action(
+                    session_id=client.room.session_id, patch=room_patch, at=stand_at, token=self.token,
+                )
+                if snapshot.at != stand_at:
+                    break
+            except RoomApiError:
+                break
+            confirmed = {field: patch.values[field] for field, value in values.items()
+                         if patch_matches_state(DevicePatch(patch.device_id, {field: value}), snapshot.state)}
+            if confirmed:
+                applied[patch.device_id] = confirmed
+            if len(confirmed) != len(values):
+                break
+        else:
+            complete = True
+
+        self.record_live_changes(client, at, applied)
+        return ("applied" if complete else "partial" if applied else "room_error"), applied
+
+    def record_live_changes(self, client, at, applied):
+        if applied:
+            live = (*client.live_steps, *(ScenarioStep(at, device, values) for device, values in applied.items()))
+            steps, view = self.schedule(client, client.period_changes, client.alarm_changes, live)
+            client.live_steps, client.personal_steps, client.personal_view = live, steps, view
+            client.revision += 1
+
+    @staticmethod
+    def room_time(client, at):
+        if client.run.stage == "final":
+            return at
+        delta = client.room.starts_at.astimezone(UTC) - client.clock.start.astimezone(UTC)
+        return (at.astimezone(UTC) + delta).astimezone(client.room.starts_at.tzinfo)
 
     async def update_clock(self, key: str, client: DemoClient, at: datetime | None, paused: bool | None):
         async with client.write_lock:
@@ -225,13 +368,11 @@ class DemoService:
     async def room_state(self, client: DemoClient, at: datetime | None):
         at = at if at is not None else client.clock.now()
         client.clock.validate_time(at)
-        stand_at = at
-        if client.run.stage == "dev":
-            delta = client.room.starts_at.astimezone(UTC) - client.clock.start.astimezone(UTC)
-            stand_at = (at.astimezone(UTC) + delta).astimezone(client.room.starts_at.tzinfo)
+        stand_at = self.room_time(client, at)
         snapshot = await self.rooms.get_state(session_id=client.room.session_id, at=stand_at, token=self.token)
         state = {device: dict(fields) for device, fields in snapshot.state.items()}
         if client.run.stage == "dev" and state.get("alarm", {}).get("at"):
+            delta = stand_at.astimezone(UTC) - at.astimezone(UTC)
             alarm_at = datetime.fromisoformat(state["alarm"]["at"])
             state["alarm"]["at"] = (alarm_at.astimezone(UTC) - delta).astimezone(client.clock.start.tzinfo).isoformat()
         return {"at": at, "state": state}
@@ -258,15 +399,7 @@ class DemoService:
         user = index.users_by_id[stay.user_id]
         pref_key = code, user.user_id
         if pref_key not in self.preferences:
-            source = parsed.source
-            profile = ProfileContext(
-                user=source.users_by_id[user.user_id],
-                events=tuple(source.events_by_user_and_id[user.user_id, e.event_id]
-                             for e in index.events_by_user[user.user_id]),
-                chat_history=tuple(source.messages_by_user_and_id[user.user_id, m.message_id]
-                                   for m in index.chat_history_by_user[user.user_id]),
-                devices=source.devices, tracks=source.tracks,
-            )
+            profile = self.profile(parsed, index, user.user_id)
             hints = None
             try:
                 results = await self.ai.extract_preference_hints([profile], timeout_s=60)
@@ -274,6 +407,7 @@ class DemoService:
                     hints = results[0]
             except (AiAgentError, TimeoutError):
                 pass
+            self.hints[pref_key] = hints
             self.preferences[pref_key] = resolve_preferences(user, index.tracks_by_id, hints)
         preferences = self.preferences[pref_key]
         steps = SleepPlanner().plan(stay, preferences, index.device_fields_by_device)
@@ -288,6 +422,17 @@ class DemoService:
         view = stay_view(stay, steps, index, samples)
         self.plans[plan_key] = DemoPlan(stay, steps, view, boundaries, samples)
         return self.plans[plan_key]
+
+    @staticmethod
+    def profile(parsed, index, user_id):
+        source = parsed.source
+        return ProfileContext(
+            user=source.users_by_id[user_id],
+            events=tuple(source.events_by_user_and_id[user_id, e.event_id] for e in index.events_by_user[user_id]),
+            chat_history=tuple(source.messages_by_user_and_id[user_id, m.message_id]
+                               for m in index.chat_history_by_user[user_id]),
+            devices=source.devices, tracks=source.tracks,
+        )
 
 
 def shifted_steps(plan: DemoPlan, room: RoomSession) -> list[ScenarioStep]:

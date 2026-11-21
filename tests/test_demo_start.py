@@ -15,6 +15,7 @@ from concierge_service.domain.sleep import SleepPlanner
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
+from concierge_service.ports.ai import AbsoluteAmount, EmptySlots, NoSlotsInterpretation, NumericInterpretation, RelativeAmount
 from concierge_service.service.demo import DemoService
 from concierge_service.transport.http.demo import install_demo
 from test_concierge_stage1 import dataset_payload
@@ -32,6 +33,8 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.calls = []
         self.scenarios = []
         self.room_scenarios = {}
+        self.room_actions = {}
+        self.failed_action_devices = set()
         self.fail_publish = False
         self.closed_rooms = set()
         self.until = timedelta(hours=18)
@@ -68,10 +71,7 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         if request.method == "GET" and path.endswith("/state"):
             sid = path.split("/")[2]
             at = datetime.fromisoformat(request.url.params["at"])
-            state = {"climate": {"temperature_c": 23}}
-            for step in self.room_scenarios[sid]:
-                if datetime.fromisoformat(step["at"]) <= at:
-                    state.setdefault(step["device_id"], {}).update(step["values"])
+            state = self.snapshot(sid, at)
             return httpx.Response(200, json={
                 "session_id": sid, "room_id": sid, "at": at.isoformat(), "state": state,
             })
@@ -103,6 +103,15 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
                 "from": self.check_in.isoformat(), "at": self.check_in.isoformat(),
                 "until": (self.check_in + self.until).isoformat(), "initial_state": {"light": {"brightness": 70}},
             })
+        if path.endswith("/action"):
+            sid = path.split("/")[2]
+            if body["device_id"] in self.failed_action_devices:
+                return httpx.Response(503)
+            self.room_actions.setdefault(sid, []).append(body)
+            at = datetime.fromisoformat(body["at"])
+            return httpx.Response(200, json={
+                "session_id": sid, "room_id": sid, "at": at.isoformat(), "state": self.snapshot(sid, at),
+            })
         self.assertTrue(path.endswith("/scenario"))
         if path.split("/")[2] in self.closed_rooms:
             return httpx.Response(410)
@@ -111,8 +120,18 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.scenarios.append(body["steps"])
         sid = path.split("/")[2]
         self.room_scenarios[sid] = body["steps"]
+        self.room_actions.pop(sid, None)
         return httpx.Response(200, json={"session_id": sid, "room_id": sid,
                                         "at": self.check_in.isoformat(), "state": {"light": {"brightness": 70}}})
+
+    def snapshot(self, sid, at):
+        state = {"climate": {"temperature_c": 23}, "light": {"brightness": 70, "color_temperature_k": 4000},
+                 "sound": {"volume": 20}, "dnd": {"enabled": False}, "curtains": {"position": 100}}
+        steps = self.room_scenarios[sid] + self.room_actions.get(sid, [])
+        for step in sorted(steps, key=lambda step: datetime.fromisoformat(step["at"])):
+            if datetime.fromisoformat(step["at"]) <= at:
+                state.setdefault(step["device_id"], {}).update(step["values"])
+        return state
 
     async def start(self, number=1, **fields):
         return await self.api.post("/api/v1/run_client", headers={"Authorization": f"Bearer {number:064x}"},
@@ -368,3 +387,84 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
             response = await self.room_request("PATCH", "/stay/current", json={"revision": 0, **payload})
             self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(len(self.scenarios), 1)
+
+    async def test_chat_live_and_scheduled_changes_use_server_time(self):
+        self.final_dataset()
+        for key in (1, 2):
+            self.assertEqual((await self.start(key, dataset_code="final-code", access_code="show-code")).status_code, 200)
+        client = self.service.clients[f"{1:064x}"]
+        start, night, morning, _ = client.plan.boundaries
+        at = start + timedelta(minutes=5)
+        await self.room_request("PATCH", "/demo/clock", json={"at": at.isoformat(), "paused": True})
+        interpreter = AsyncMock(side_effect=[
+            NumericInterpretation(record_id="one", intent="cooler", slots=RelativeAmount(mode="relative", amount=1)),
+            NumericInterpretation(record_id="two", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=19)),
+        ])
+        self.service.ai.interpret_request = interpreter
+        first = {"client_message_id": "one", "text": "сделай на градус прохладнее"}
+        first_two = await asyncio.gather(*(self.room_request("POST", "/messages", json=first) for _ in range(2)))
+        self.assertEqual(first_two[0].json(), first_two[1].json())
+        self.assertEqual(first_two[0].json()["changes"], {"climate": {"temperature_c": 22}})
+        self.assertEqual(self.calls.count(f"/room/{client.room.session_id}/action"), 1)
+        self.assertEqual(self.scenarios[-1][0]["at"], start.isoformat())
+        self.assertEqual(interpreter.await_args_list[0].args[0].request["at"], at.isoformat())
+        view = (await self.room_request("GET", "/stay/current")).json()
+        self.assertEqual(view["periods"][0]["temperature"], 22)
+        self.assertEqual(view["revision"], 1)
+
+        second = await self.room_request("POST", "/messages", json={
+            "client_message_id": "two", "text": "ночью поставь 19 градусов",
+        })
+        self.assertEqual(second.status_code, 200, second.text)
+        self.assertEqual(second.json()["reply"]["text"], "Обновил настройки на ночь.")
+        self.assertEqual(interpreter.await_args.args[0].request["at"], night.isoformat())
+        self.assertEqual(len(interpreter.await_args.args[0].conversation), 2)
+        self.assertEqual(self.calls.count(f"/room/{client.room.session_id}/action"), 1)
+        self.assertEqual(len(self.scenarios), 3)
+        for when, value in ((at, 22), (night - timedelta(seconds=1), 22), (night, 19), (morning, 17.5)):
+            result = await self.room_request("GET", "/room/state", params={"at": when.isoformat()})
+            self.assertEqual(result.json()["state"]["climate"]["temperature_c"], value)
+        self.assertEqual((await self.room_request("GET", "/stay/current", 2)).json()["revision"], 0)
+
+        latest = (await self.room_request("GET", "/messages", params={"limit": 2})).json()
+        self.assertEqual([m["id"] for m in latest["items"]], ["two.user", "two.reply"])
+        earlier = (await self.room_request("GET", "/messages", params={"before": latest["next_before"]})).json()
+        self.assertEqual([m["id"] for m in earlier["items"]], ["one.user", "one.reply"])
+        self.assertIsNone(earlier["next_before"])
+        self.assertEqual((await self.room_request("GET", "/messages", 2)).json()["items"], [])
+        conflict = await self.room_request("POST", "/messages", json=first | {"text": "другой текст"})
+        self.assertEqual(conflict.status_code, 409)
+
+    async def test_unconfirmed_future_chat_does_not_change_plan(self):
+        await self.start(access_code="show-code")
+        self.fail_publish = True
+        self.service.ai.interpret_request = AsyncMock(return_value=NumericInterpretation(
+            record_id="fail", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=19),
+        ))
+        response = await self.room_request("POST", "/messages", json={
+            "client_message_id": "fail", "text": "ночью поставь 19 градусов",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["changes"], {})
+        self.assertEqual(response.json()["revision"], 0)
+        self.assertIn("Не удалось подтвердить", response.json()["reply"]["text"])
+
+    async def test_chat_partial_action_keeps_only_confirmed_fields(self):
+        await self.start(access_code="show-code")
+        client = self.service.clients[f"{1:064x}"]
+        await self.room_request("PATCH", "/demo/clock", json={"at": client.clock.start.isoformat(), "paused": True})
+        sid = str(client.room.session_id)
+        for step in self.room_scenarios[sid]:
+            if step["device_id"] == "sound":
+                step["values"]["volume"] = 20
+        self.failed_action_devices.add("sound")
+        self.service.ai.interpret_request = AsyncMock(return_value=NoSlotsInterpretation(
+            record_id="partial", intent="all_off", slots=EmptySlots(),
+        ))
+        response = await self.room_request("POST", "/messages", json={
+            "client_message_id": "partial", "text": "выключи свет и звук",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["changes"], {"light": {"brightness": 0}})
+        self.assertIn("Часть изменений", response.json()["reply"]["text"])
+        self.assertEqual(client.revision, 1)

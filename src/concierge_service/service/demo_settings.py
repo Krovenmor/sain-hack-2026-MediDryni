@@ -50,12 +50,28 @@ class DemoClock:
             raise HackApiError(422, "time_outside_stay")
 
 
+def period_devices(fields):
+    devices: dict[str, dict[str, JSONScalar]] = {}
+    for name, value in fields.items():
+        device, field = PERIOD_FIELDS[name]
+        devices.setdefault(device, {})[field] = value
+    return devices
+
+
+def combine_period_changes(previous, changes):
+    result = dict(previous)
+    for period, devices in changes.items():
+        old = result.get(period, {})
+        result[period] = old | {device: old.get(device, {}) | values for device, values in devices.items()}
+    return result
+
+
 def update_periods(steps, boundaries, changes, catalog):
     """Replace only the edited fields within the selected period."""
     original = steps
     for index, period in enumerate(PERIODS):
-        fields = changes.get(period, {})
-        if not fields:
+        devices = changes.get(period, {})
+        if not devices:
             continue
         start = boundaries[index]
         end = boundaries[index + 1] if index + 1 < len(boundaries) else None
@@ -63,10 +79,6 @@ def update_periods(steps, boundaries, changes, catalog):
         end_at = end.timestamp() if end is not None else float("inf")
         if start_at == end_at:
             raise HackApiError(422, "empty_period")
-        devices: dict[str, dict[str, JSONScalar]] = {}
-        for name, value in fields.items():
-            device, field = PERIOD_FIELDS[name]
-            devices.setdefault(device, {})[field] = value
         for device, values in devices.items():
             catalog.validate(device, values)
         updated = []

@@ -69,6 +69,13 @@ class ClockPatch(BaseModel):
     paused: Annotated[bool, Field(strict=True)] | None = None
 
 
+class MessagePost(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    client_message_id: Annotated[Identifier, Field(max_length=120)]
+    text: Annotated[str, Field(min_length=1, max_length=2000)]
+
+
 @contextmanager
 def demo_errors():
     try:
@@ -167,6 +174,19 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
                          at: Annotated[AwareDatetime | None, Query()] = None):
         with demo_errors():
             return await service.room_state(client, at)
+
+    @app.get("/api/v1/messages")
+    async def read_messages(client: Annotated[DemoClient, Depends(get_client_session)],
+                            limit: Annotated[int, Query(ge=1, le=100)] = 30,
+                            before: Annotated[Identifier | None, Query()] = None):
+        with demo_errors():
+            return client.messages.page(limit, before)
+
+    @app.post("/api/v1/messages")
+    async def send_message(payload: MessagePost, key: Annotated[str, Depends(client_key)],
+                           client: Annotated[DemoClient, Depends(get_client_session)]):
+        with demo_errors():
+            return await service.send_message(key, client, payload.client_message_id, payload.text)
 
     class PrivateBuild(StaticFiles):
         async def __call__(self, scope, receive, send):

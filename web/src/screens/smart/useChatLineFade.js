@@ -1,6 +1,7 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 export function useChatLineFade(log, turns, showPhrases) {
+  const lastView = useRef(null);
   useLayoutEffect(() => {
     const viewport = log.current;
     if (!viewport) return;
@@ -35,15 +36,25 @@ export function useChatLineFade(log, turns, showPhrases) {
       if (!disposed && !frame) frame = requestAnimationFrame(update);
     }
 
-    viewport.scrollTop = viewport.scrollHeight;
+    const first = turns[0]?.id;
+    const tail = turns.at(-1)?.id;
+    const previous = lastView.current;
+    const prepended = previous?.viewport === viewport && first !== previous.first && tail === previous.tail;
+    viewport.scrollTop = prepended ? previous.top + viewport.scrollHeight - previous.height : viewport.scrollHeight;
     update();
-    let following = true;
+    let following = !prepended;
+    function remember() {
+      lastView.current = { viewport, first, tail, top: viewport.scrollTop, height: viewport.scrollHeight };
+    }
+    remember();
     function onScroll() {
       following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 4;
+      remember();
       schedule();
     }
     const observer = new ResizeObserver(() => {
       if (following) viewport.scrollTop = viewport.scrollHeight;
+      remember();
       schedule();
     });
     observer.observe(viewport);

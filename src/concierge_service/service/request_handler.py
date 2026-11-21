@@ -2,11 +2,13 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from time import monotonic
 from uuid import UUID
 
 from concierge_service.domain.action_planner import (
     ActionPlanError,
+    DevicePatch,
     patch_matches_state,
 )
 from concierge_service.domain.answers import RequestAnswer
@@ -82,6 +84,32 @@ class RequestHandler:
             duration_ms=round((monotonic() - started) * 1000),
         )
         return RequestAnswer(request.record_id, str(session.session_id), replies, applied)
+
+    async def handle_interactive(
+        self, request: Request, context: RequestContext, catalog: DeviceFields,
+        preferences: ResolvedPreferences,
+        execute: Callable[[tuple[DevicePatch, ...]], Awaitable[tuple[RequestOutcome, dict]]],
+    ) -> tuple[RequestOutcome, str, dict]:
+        intent = None
+        applied = {}
+        try:
+            deadline = asyncio.get_running_loop().time() + _INTERPRETATION_TIMEOUT_S
+            interpreted = await self._interpret(request, context, deadline)
+            intent = interpreted.intent
+            if intent in ("medical", "out_of_scope"):
+                outcome = intent
+            elif isinstance(interpreted, InvalidValueInterpretation):
+                outcome = interpreted.slots.reason
+            else:
+                patches = plan_request(request, interpreted, context, preferences, catalog)
+                outcome, applied = await execute(patches) if patches else ("unchanged", {})
+        except AiAgentError as exc:
+            outcome = "missing_history" if exc.code == "unresolved_reference" else "unrecognized"
+        except TimeoutError:
+            outcome = "unrecognized"
+        except ActionPlanError as exc:
+            outcome = exc.reason
+        return outcome, compose_replies(request, outcome, intent=intent)[0].text, applied
 
     async def _resolve(
         self,

@@ -1,6 +1,6 @@
 import "./light-settings.css";
 import { useRef, useState } from "react";
-import send from "../../../assets/send.svg";
+import sendIcon from "../../../assets/send.svg";
 import microphone from "../../../assets/microphone.svg";
 import voiceBack from "../../../assets/voice-back.svg";
 import { VoiceLight } from "./VoiceLight.jsx";
@@ -9,7 +9,7 @@ import { lightModes } from "../../components/LightBeam.jsx";
 
 import { useChatLineFade } from "./useChatLineFade.js";
 import { useMicrophoneLevel } from "./useMicrophoneLevel.js";
-import { composeDemoTurn, composeDemoVoiceTurn, quickPhrases } from "./chat.js";
+import { composeDemoVoiceTurn, quickPhrases } from "./chat.js";
 
 function Thinking({ className = "" }) {
   return <p className={className}>Думает<span className="thinking-dots" aria-hidden="true">...</span></p>;
@@ -29,11 +29,13 @@ function RoomReply({ turn, text = turn.reply }) {
   );
 }
 
-export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSend }) {
+export function LightSettings({ mode, onModeChange, chat, chatReply }) {
+  const { turns, send, addVoice, cursor, loading, error, history } = chat;
   const [showPhrases, setShowPhrases] = useState(false);
   const [voiceStart, setVoiceStart] = useState(null);
   const voiceOpen = voiceStart !== null;
-  const voiceTurn = voiceOpen && turns.length > voiceStart ? turns.at(-1) : null;
+  const tail = turns.at(-1);
+  const voiceTurn = voiceOpen && tail?.voice && tail.id !== voiceStart.last ? tail : null;
   const { replyText, busy } = chatReply;
   const voiceReply = voiceTurn && replyText !== null ? voiceTurn : null;
   const [draft, setDraft] = useState("");
@@ -48,8 +50,7 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
 
   function sendText(text) {
     if (inputBusy) return;
-    const turn = composeDemoTurn(text, stay);
-    if (turn) onSend(turn);
+    if (text.trim()) void send(text.trim());
   }
 
   function closeVoice() {
@@ -63,7 +64,7 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
     if (inputBusy) return;
     setRecordingStatus("");
     if (!voiceOpen || voiceTurn) {
-      setVoiceStart(turns.length);
+      setVoiceStart({ last: turns.at(-1)?.id });
     } else {
       const recording = stopRecording();
       if (!recording) {
@@ -77,7 +78,7 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
       pendingRecording.current = null;
       setFinishingRecording(false);
       const turn = composeDemoVoiceTurn(audio);
-      if (turn) onSend(turn);
+      if (turn) addVoice(turn);
       else setRecordingStatus("Не удалось записать голосовое. Вернитесь в чат, чтобы написать просьбу.");
     }
   }
@@ -110,12 +111,18 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
       )}
       {turns.length ? (
         <div className="chat-log" role="log" aria-label="Переписка" ref={log}>
+          {cursor && <button type="button" className="pill chat-history" disabled={loading}
+            onClick={() => void history(cursor)}>Ранние сообщения</button>}
           {turns.map((turn, index) => (
-            <div className="chat-turn" key={index}>
+            <div className="chat-turn" key={turn.id ?? index}>
               <p className="guest-message"><span className="visually-hidden">Вы: </span><span className="guest-text">{turn.text}</span></p>
-              {index < turns.length - 1 ? (
+              {turn.failed ? (
+                <button className="pill" type="button" disabled={busy} onClick={() => void send(turn.text, turn.id)}>
+                  Повторить отправку
+                </button>
+              ) : turn.reply && index < turns.length - 1 ? (
                 <RoomReply turn={turn} />
-              ) : replyText === null ? (
+              ) : !turn.reply || replyText === null ? (
                 <Thinking className="chat-thinking" />
               ) : (
                 <RoomReply turn={turn} text={replyText} />
@@ -125,6 +132,8 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
         </div>
       ) : <h1 id="light-title" className="light-title">Ваши<br />пожелания?</h1>}
       <div className="light-controls">
+        {!voiceOpen && error && <p className="microphone-status" role="status">{error}</p>}
+        {!voiceOpen && loading && !turns.length && <p className="microphone-status" role="status">Загружаем переписку…</p>}
         {voiceOpen && (microphoneError || recordingStatus) && (
           <p className="microphone-status" role="status">{microphoneError || recordingStatus}</p>
         )}
@@ -154,9 +163,9 @@ export function LightSettings({ mode, onModeChange, stay, turns, chatReply, onSe
           setDraft("");
         }}>
           {!voiceOpen && <>
-            <input aria-label="Сообщение" placeholder="Сообщение" value={draft} disabled={inputBusy}
+            <input aria-label="Сообщение" placeholder="Сообщение" value={draft} maxLength={2000} disabled={inputBusy}
               onChange={event => setDraft(event.target.value)} />
-            <button type="submit" aria-label="Отправить сообщение" disabled={inputBusy || !draft.trim()}><img src={send} alt="" /></button>
+            <button type="submit" aria-label="Отправить сообщение" disabled={inputBusy || !draft.trim()}><img src={sendIcon} alt="" /></button>
           </>}
           <button className="voice-toggle" type="button" aria-label={voiceOpen && !voiceTurn ? "Отправить голосовое сообщение" : "Начать запись"}
             aria-pressed={voiceOpen} disabled={inputBusy} onClick={toggleVoice}>

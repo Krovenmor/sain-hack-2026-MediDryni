@@ -1,21 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { demoStay } from "../../data/demoStay.js";
-import { composeDemoTurn, quickPhrases } from "./chat.js";
+import { composeDemoVoiceTurn, turnsFromMessages } from "./chat.js";
 
-test("empty messages do not create chat turns", () => {
-  assert.equal(composeDemoTurn("  \n ", demoStay), null);
+test("history keeps turns in server order", () => {
+  const turn = (id, text, reply) => [
+    { client_message_id: id, role: "user", text },
+    { client_message_id: id, role: "agent", text: reply },
+  ];
+  assert.deepEqual(turnsFromMessages([...turn("a", "Теплее", "Готово"), ...turn("b", "Потише", "Убавил")]), [
+    { id: "a", text: "Теплее", reply: "Готово" },
+    { id: "b", text: "Потише", reply: "Убавил" },
+  ]);
 });
 
-test("typed messages and all shortcuts produce a local reply", () => {
-  for (const text of [...quickPhrases, "Можно потише?"]) {
-    const turn = composeDemoTurn(" " + text + " ", demoStay);
-    assert.equal(turn.text, text);
-    assert.ok(turn.reply.length);
-  }
-});
-
-test("the night reply reads the current stay", () => {
-  const stay = { periods: [{ name: "Ночь", temperature: 18, light: { brightness: 5 } }] };
-  assert.match(composeDemoTurn("Я ложусь!", stay).reply, /18 °C.*5 %/);
+test("voice placeholder requires a recording", () => {
+  assert.equal(composeDemoVoiceTurn(new Blob()), null);
+  assert.match(composeDemoVoiceTurn(new Blob(["voice"])).reply, /Распознавание речи пока недоступно/);
 });

@@ -3,6 +3,7 @@ import orb from "../assets/orb.png";
 import menuIcon from "../assets/menu.svg";
 import manualMenuIcon from "../assets/manual-menu.svg";
 import { LightBeam } from "./components/LightBeam.jsx";
+import { useRoomChat } from "./screens/smart/useRoomChat.js";
 import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
@@ -37,8 +38,10 @@ export function App({ stay: initialStay }) {
   const wakeUp = { ...stay.wakeUp, ...alarmChanges };
   const { kelvin } = (draft ? periods : stay.periods)[selected].light;
   const lightMode = kelvin < 3100 ? "warm" : kelvin < 5250 ? "neutral" : "cold";
-  const [chatTurns, setChatTurns] = useState([]);
-  const chatReply = useChatReply(chatTurns.at(-1));
+  const chat = useRoomChat(screen === "light", view => {
+    setStay(previous => view.revision >= previous.revision ? view : previous);
+  });
+  const chatReply = useChatReply(chat.turns.at(-1));
   const menu = useRef(null);
   function navigate(nextScreen) {
     if (menu.current.open) menu.current.close();
@@ -110,8 +113,7 @@ export function App({ stay: initialStay }) {
           </div>
         )}
         {screen === "light" && (
-          <LightSettings mode={lightMode} onModeChange={kelvin => { if (!saving) changePeriod({ kelvin }); }} stay={stay} turns={chatTurns} chatReply={chatReply}
-            onSend={turn => setChatTurns(previous => [...previous, turn])} />
+          <LightSettings mode={lightMode} onModeChange={kelvin => { if (!saving) changePeriod({ kelvin }); }} chat={chat} chatReply={chatReply} />
         )}
         {screen === "scenario" && (
           <>

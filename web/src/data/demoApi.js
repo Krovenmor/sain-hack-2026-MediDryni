@@ -19,6 +19,7 @@ export async function demoRequest(path, method = "GET", body) {
 }
 
 const errors = {
+  message_conflict: "Этот запрос уже отправлен с другим текстом.",
   show_ended: "Показ завершён.",
   alarm_outside_stay: "Выберите время будильника в пределах заезда.",
   alarm_mode_required: "Для будильника включите звук или свет.",
