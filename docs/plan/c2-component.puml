@@ -1,17 +1,18 @@
 @startuml
-title Компоненты онлайн-бэкенда
+title Зависимости компонентов: онлайн-прогон и показ
 
 skinparam backgroundColor #F8FAFC
-skinparam defaultFontName "DejaVu Sans"
+skinparam defaultFontName "Arial"
+skinparam titleFontName "Arial"
 skinparam defaultFontSize 14
 skinparam defaultFontColor #0F172A
 skinparam titleFontSize 20
 skinparam packageTitleAlignment left
 skinparam titleFontColor #0F172A
 skinparam shadowing false
-skinparam linetype polyline
-skinparam nodesep 45
-skinparam ranksep 50
+skinparam linetype ortho
+skinparam nodesep 55
+skinparam ranksep 85
 skinparam roundCorner 12
 skinparam ArrowColor #64748B
 skinparam ArrowFontColor #475569
@@ -22,27 +23,41 @@ skinparam rectangle {
 }
 
 rectangle "Стенд хакатона" as caller #E2E8F0
+rectangle "Браузер жюри\nReact-клиент показа" as browser #E2E8F0
 
-rectangle "MediDryni · один процесс Python" #FFFFFF {
-  rectangle "concierge_service" #EFF6FF {
-    rectangle "FastAPI\nPOST /run · GET /health" as http #E0F2FE
-    rectangle "RunCase\nSleepPlanner · RequestHandler" as core #DBEAFE
-    rectangle "История диалога\nв памяти прогона" as store #FFF7ED
-    rectangle "HackApiAdapter · RoomApiAdapter" as adapters #ECFEFF
-  }
+rectangle "                                                                                                                                                                                           МедиДруны · один процесс Python" #FFFFFF {
   rectangle "ai_service\nПредпочтения и намерения" as ai #EDE9FE
+  rectangle "                                                                                                                                                        concierge_service" #EFF6FF {
+    rectangle "FastAPI\nPOST /run · GET /health" as http #E0F2FE
+    rectangle "Demo API /api/v1\nвход по коду · сборка клиента" as demohttp #E0F2FE
+    rectangle "RunCase\nпрогон набора" as core #DBEAFE
+    rectangle "DemoService\nкомната, личный план и часы клиента" as demo #DBEAFE
+    rectangle "Общая логика\nSleepPlanner · RequestHandler\nпланировщик действий · каталог устройств" as shared #DBEAFE
+    rectangle "В памяти процесса\nдиалог прогона · переписка показа" as store #FFF7ED
+    rectangle "HackApiAdapter · RoomApiAdapter\nVoiceProxy" as adapters #ECFEFF
+  }
 }
 
-rectangle "Hack API\nНабор данных" as dataset #FFFFFF
-rectangle "Симулятор номера\nСеансы, сценарии, действия" as room #FFFFFF
-rectangle "Прокси LLM" as llm #FFFFFF
+rectangle "Внешние системы" #FFFFFF {
+  rectangle "Hack API\nНабор данных и прогоны" as dataset #F1F5F9
+  rectangle "Симулятор номера\nСеансы, сценарии, действия" as room #F1F5F9
+  rectangle "Прокси LLM\nРазбор текста, распознавание и синтез речи" as llm #F1F5F9
+}
 
-caller --> http : запускает прогон по HTTP
-http --> core : передаёт запрос
-core --> ai : <back:#F8FAFC>вызывает AiAgent</back>
-core --> adapters : получает данные\nи управляет номером
-core --> store : читает и дополняет\nдиалог гостя
-adapters --> dataset : загружает набор
-adapters --> room : создаёт сеансы, загружает\nсценарии, применяет действия
-ai --> llm : отправляет контекст\nдля разбора
+caller "<color:#FFFFFF>i</color>\n<color:#FFFFFF>i</color>\n<size:1><color:#FFFFFF>i</color></size>\nPOST /run<color:#FFFFFF>i</color>" --> http
+browser "<size:1><color:#FFFFFF>i</color></size>\n<size:1><color:#FFFFFF>i</color></size>\n<size:1><color:#FFFFFF>i</color></size>\nвход, чат, голос<color:#FFFFFF>i</color>" --> demohttp
+http --> core
+demohttp --> demo
+core --> shared
+demo --> shared : те же просьбы
+core --> store
+demo --> store
+shared --> ai : порт AiAgent<color:#EFF6FF>ii</color>
+shared --> adapters
+core --> adapters
+demo --> adapters
+adapters --> dataset
+adapters --> room
+adapters --> llm : речь<color:#EFF6FF>MMMMii</color>
+ai --> "разбор текста" llm
 @enduml
