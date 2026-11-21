@@ -21,7 +21,7 @@ from concierge_service.transport.http.demo import install_demo
 from test_concierge_stage1 import dataset_payload
 
 
-class DemoStartTests(unittest.IsolatedAsyncioTestCase):
+class DemoFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.dataset = dataset_payload()
         self.datasets = {"case2-test-v1": self.dataset}
@@ -137,6 +137,19 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         return await self.api.post("/api/v1/run_client", headers={"Authorization": f"Bearer {number:064x}"},
                                    json={"dataset_code": "case2-test-v1", **fields})
 
+    def final_dataset(self):
+        data = dataset_payload()
+        data["meta"].update(phase="final", dataset_id="case2-final-test")
+        data["requests"] = []
+        self.datasets["final-code"] = data
+        return data
+
+    async def room_request(self, method, path, number=1, **kwargs):
+        return await self.api.request(method, f"/api/v1{path}",
+                                      headers={"Authorization": f"Bearer {number:064x}"}, **kwargs)
+
+
+class DemoStartTests(DemoFixture):
     def assert_same_stay(self, actual, expected):
         self.assertEqual(actual["status"], expected["status"])
         self.assertEqual({k: v for k, v in actual["stay"].items() if k != "clock"},
@@ -234,13 +247,6 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.scenarios)
 
 
-    def final_dataset(self):
-        data = dataset_payload()
-        data["meta"].update(phase="final", dataset_id="case2-final-test")
-        data["requests"] = []
-        self.datasets["final-code"] = data
-        return data
-
     async def test_five_final_clients_and_two_tabs_share_one_original_schedule(self):
         data = self.final_dataset()
         data["stays"].append(data["stays"][0] | {"record_id": "stay_2"})
@@ -316,10 +322,6 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.start(**args)).json()["detail"]["code"], "show_ended")
         self.assertEqual((await self.api.get("/demo/room.js")).status_code, 410)
         self.assertEqual(self.calls.count("/runs"), 1)
-
-    async def room_request(self, method, path, number=1, **kwargs):
-        return await self.api.request(method, f"/api/v1{path}",
-                                      headers={"Authorization": f"Bearer {number:064x}"}, **kwargs)
 
     async def test_settings_publish_once_preserve_other_periods_and_resume(self):
         data = self.final_dataset()

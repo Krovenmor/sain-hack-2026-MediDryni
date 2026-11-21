@@ -46,6 +46,12 @@ class DemoMessages:
             raise HackApiError(409, "message_conflict")
         return result
 
+    def reply(self, reply_id: str) -> str:
+        for message in self.messages:
+            if message["id"] == reply_id and message["role"] == "agent":
+                return message["text"]
+        raise HackApiError(404, "message_not_found")
+
     def context(self) -> tuple[DialogueMessage, ...]:
         return tuple(DialogueMessage(role=m["role"], at=m["at"], text=m["text"], applied=m.get("applied"))
                      for m in self.messages)

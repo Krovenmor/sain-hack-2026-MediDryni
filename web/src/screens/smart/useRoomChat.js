@@ -25,7 +25,7 @@ export function useRoomChat(open, onStay) {
         if (before || initial) return [...older, ...previous.filter(turn => !fromPage.has(turn.id))];
         const existing = new Set(previous.map(turn => turn.id));
         return [...previous.map(turn => fromPage.has(turn.id) && !turn.reply
-          ? older.find(saved => saved.id === turn.id) : turn),
+          ? { ...turn, ...older.find(saved => saved.id === turn.id), failed: false } : turn),
         ...older.filter(turn => !existing.has(turn.id))];
       });
       if (before || initial) setCursor(page.next_before);
@@ -43,16 +43,17 @@ export function useRoomChat(open, onStay) {
     if (open) void history();
   }, [open]);
 
-  async function send(text, id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))]
-    .map(byte => byte.toString(16).padStart(2, "0")).join("")) {
+  async function send(text, id = newMessageId(), recordingId) {
     if (pending.current) return;
     pending.current = true;
     setError("");
-    setTurns(previous => [...previous.filter(turn => turn.id !== id), { id, text, reply: null }]);
+    setTurns(previous => [...previous.filter(turn => turn.id !== id), { id, text, recordingId, reply: null }]);
     try {
-      const result = await demoRequest("/messages", "POST", { client_message_id: id, text });
+      const source = recordingId ? { recording_id: recordingId } : { text };
+      const result = await demoRequest("/messages", "POST", { client_message_id: id, ...source });
       setTurns(previous => previous.map(turn => turn.id === id
-        ? { id, text: result.guest.text, reply: result.reply.text, animate: true } : turn));
+        ? { id, text: result.guest.text, reply: result.reply.text, replyId: result.reply.id,
+            recordingId, animate: true } : turn));
       if (Object.keys(result.changes).length) {
         onStay(await demoRequest("/stay/current"));
       }
@@ -65,9 +66,10 @@ export function useRoomChat(open, onStay) {
     }
   }
 
-  function addVoice(turn) {
-    setTurns(previous => [...previous, { ...turn, id: `voice-${Date.now()}`, voice: true, animate: true }]);
-  }
+  return { turns, send, cursor, loading, error, history };
+}
 
-  return { turns, send, addVoice, cursor, loading, error, history };
+export function newMessageId() {
+  return [...crypto.getRandomValues(new Uint8Array(16))]
+    .map(byte => byte.toString(16).padStart(2, "0")).join("");
 }

@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from concierge_service.domain.action_planner import ActionPlanError, DevicePatch, patch_matches_state
 from concierge_service.domain.dataset import DatasetIndex, Request, Stay, Utterance, build_dataset_index
@@ -13,6 +14,7 @@ from concierge_service.ports.ai import AiAgent, AiAgentError, PreferenceHints, P
 from concierge_service.ports.dataset import ParsedDataset
 from concierge_service.ports.hack_api import DemoHackApi, DemoRun, HackApiError
 from concierge_service.ports.room import RoomApi, RoomApiError, RoomSession
+from concierge_service.ports.voice import VoiceApi, VoiceError
 from concierge_service.service.demo_messages import DemoMessages, requested_period
 from concierge_service.service.demo_settings import (
     PERIODS, DemoClock, alarm_steps, combine_period_changes, merge_steps, period_devices, update_periods,
@@ -43,6 +45,9 @@ class DemoClient:
     period_changes: dict = field(default_factory=dict)
     alarm_changes: dict = field(default_factory=dict)
     messages: DemoMessages = field(default_factory=DemoMessages)
+    recordings: dict[str, str] = field(default_factory=dict)
+    speech: dict[str, bytes] = field(default_factory=dict)
+    speech_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     live_steps: tuple[ScenarioStep, ...] = ()
     personal_steps: tuple[ScenarioStep, ...] | None = None
     personal_view: dict | None = None
@@ -55,10 +60,12 @@ class DemoClient:
 
 
 class DemoService:
-    def __init__(self, hack: DemoHackApi, rooms: RoomApi, ai: AiAgent, team_token: str):
+    def __init__(self, hack: DemoHackApi, rooms: RoomApi, ai: AiAgent, team_token: str, *,
+                 voice: VoiceApi | None = None):
         self.hack = hack
         self.rooms = rooms
         self.ai = ai
+        self.voice = voice
         self.request_handler = RequestHandler(rooms, ai)
         self.hints: dict[tuple[str, str], PreferenceHints | None] = {}
         self.token = team_token
@@ -257,6 +264,32 @@ class DemoService:
     @staticmethod
     def period_index(plan, at):
         return max(i for i, start in enumerate(plan.boundaries) if start.timestamp() <= at.timestamp())
+
+    async def record_voice(self, key: str, client: DemoClient, audio: bytes, filename: str, content_type: str):
+        if self.voice is None:
+            raise VoiceError(503, "voice_unavailable")
+        text = await self.voice.transcribe(audio, filename, content_type)
+        if len(text) > 2000:
+            raise VoiceError(422, "transcript_too_long")
+        self.check_expiry(key)
+        recording_id = uuid4().hex
+        client.recordings[recording_id] = text
+        return {"recording_id": recording_id, "text": text}
+
+    async def reply_speech(self, key: str, client: DemoClient, reply_id: str) -> bytes:
+        text = client.messages.reply(reply_id)
+        async with client.speech_lock:
+            self.check_expiry(key)
+            if reply_id in client.speech:
+                return client.speech[reply_id]
+            if self.voice is None:
+                raise VoiceError(503, "voice_unavailable")
+            audio = await self.voice.synthesize(text)
+            self.check_expiry(key)
+            if len(client.speech) >= 8:
+                del client.speech[next(iter(client.speech))]
+            client.speech[reply_id] = audio
+            return audio
 
     async def send_message(self, key, client, message_id, text):
         received_at = client.clock.now()

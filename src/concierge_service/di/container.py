@@ -15,6 +15,7 @@ from concierge_service.infra.conversation_store import InMemoryConversationStore
 from concierge_service.infra.hack_api import HackApiAdapter
 from concierge_service.infra.mock_ai import MockAiAgent
 from concierge_service.infra.room import RoomApiAdapter
+from concierge_service.infra.voice import VoiceProxy
 from concierge_service.ports.ai import AiAgent
 from concierge_service.service.demo import DemoService
 from concierge_service.service.run_case import RunCase
@@ -59,4 +60,5 @@ def build_container(settings: Settings, *, ai_agent: AiAgent | None = None) -> C
         ai_agent=ai_agent,
         conversation_store_factory=InMemoryConversationStore,
     )
-    return Container(run_case, client, DemoService(hack_api, room_api, ai_agent, settings.team_token))
+    voice = VoiceProxy(client, settings.llm.base_url, settings.llm.api_key) if settings.llm else None
+    return Container(run_case, client, DemoService(hack_api, room_api, ai_agent, settings.team_token, voice=voice))

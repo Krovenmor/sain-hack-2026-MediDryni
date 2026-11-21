@@ -9,9 +9,9 @@ from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictFloat, StrictInt
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictFloat, StrictInt, model_validator
 
 from concierge_service.domain.dataset import DatasetError
 from concierge_service.domain.device_catalog import DeviceValueError
@@ -19,7 +19,9 @@ from concierge_service.domain.sleep import SleepPlanError
 from concierge_service.infra.wire import Identifier
 from concierge_service.ports.hack_api import HackApiError
 from concierge_service.ports.room import RoomApiError
+from concierge_service.ports.voice import VoiceError
 from concierge_service.service.demo import DemoClient, DemoService
+from concierge_service.transport.http.audio_upload import read_audio
 
 
 _WEB = Path(__file__).resolve().parents[4] / "web"
@@ -73,7 +75,14 @@ class MessagePost(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     client_message_id: Annotated[Identifier, Field(max_length=120)]
-    text: Annotated[str, Field(min_length=1, max_length=2000)]
+    text: Annotated[str, Field(min_length=1, max_length=2000)] | None = None
+    recording_id: Identifier | None = None
+
+    @model_validator(mode="after")
+    def exactly_one_source(self):
+        if (self.text is None) == (self.recording_id is None):
+            raise ValueError("Send exactly one of text and recording_id")
+        return self
 
 
 @contextmanager
@@ -82,6 +91,8 @@ def demo_errors():
         yield
     except HackApiError as exc:
         raise HTTPException(exc.status_code, detail={"code": exc.code}) from None
+    except VoiceError as exc:
+        raise HTTPException(exc.status, detail={"code": exc.code}) from None
     except DeviceValueError:
         raise HTTPException(422, detail={"code": "invalid_device_settings"}) from None
     except RoomApiError:
@@ -186,7 +197,26 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
     async def send_message(payload: MessagePost, key: Annotated[str, Depends(client_key)],
                            client: Annotated[DemoClient, Depends(get_client_session)]):
         with demo_errors():
-            return await service.send_message(key, client, payload.client_message_id, payload.text)
+            text = payload.text
+            if payload.recording_id is not None:
+                text = client.recordings.get(payload.recording_id)
+                if text is None:
+                    raise HackApiError(404, "recording_not_found")
+            return await service.send_message(key, client, payload.client_message_id, text)
+
+    @app.post("/api/v1/voice/recordings")
+    async def record_voice(request: Request, key: Annotated[str, Depends(client_key)],
+                           client: Annotated[DemoClient, Depends(get_client_session)]):
+        audio = await read_audio(request)
+        with demo_errors():
+            return await service.record_voice(key, client, *audio)
+
+    @app.get("/api/v1/messages/{reply_id}/speech")
+    async def speech(reply_id: Identifier, key: Annotated[str, Depends(client_key)],
+                     client: Annotated[DemoClient, Depends(get_client_session)]):
+        with demo_errors():
+            audio = await service.reply_speech(key, client, reply_id)
+        return Response(audio, media_type="audio/mpeg", headers=_PRIVATE)
 
     class PrivateBuild(StaticFiles):
         async def __call__(self, scope, receive, send):

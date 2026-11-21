@@ -1,5 +1,5 @@
 import "./light-settings.css";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import sendIcon from "../../../assets/send.svg";
 import microphone from "../../../assets/microphone.svg";
 import voiceBack from "../../../assets/voice-back.svg";
@@ -9,7 +9,10 @@ import { lightModes } from "../../components/LightBeam.jsx";
 
 import { useChatLineFade } from "./useChatLineFade.js";
 import { useMicrophoneLevel } from "./useMicrophoneLevel.js";
-import { composeDemoVoiceTurn, quickPhrases } from "./chat.js";
+import { quickPhrases, recordingUpload } from "./chat.js";
+import { demoError, demoRequest } from "../../data/demoApi.js";
+import { useReplySpeech } from "./useReplySpeech.js";
+import { newMessageId } from "./useRoomChat.js";
 
 function Thinking({ className = "" }) {
   return <p className={className}>Думает<span className="thinking-dots" aria-hidden="true">...</span></p>;
@@ -30,23 +33,25 @@ function RoomReply({ turn, text = turn.reply }) {
 }
 
 export function LightSettings({ mode, onModeChange, chat, chatReply }) {
-  const { turns, send, addVoice, cursor, loading, error, history } = chat;
+  const { turns, send, cursor, loading, error, history } = chat;
   const [showPhrases, setShowPhrases] = useState(false);
-  const [voiceStart, setVoiceStart] = useState(null);
-  const voiceOpen = voiceStart !== null;
-  const tail = turns.at(-1);
-  const voiceTurn = voiceOpen && tail?.voice && tail.id !== voiceStart.last ? tail : null;
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voiceMessageId, setVoiceMessageId] = useState(null);
+  const voiceTurn = voiceOpen ? turns.find(turn => turn.id === voiceMessageId) : null;
   const { replyText, busy } = chatReply;
-  const voiceReply = voiceTurn && replyText !== null ? voiceTurn : null;
+  const voiceReply = voiceTurn?.reply ? voiceTurn : null;
+  const speech = useReplySpeech(voiceReply?.replyId);
   const [draft, setDraft] = useState("");
   const [finishingRecording, setFinishingRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState("");
   const pendingRecording = useRef(null);
+  useEffect(() => () => pendingRecording.current?.abort(), []);
   const log = useRef(null);
   const orb = useRef(null);
   useChatLineFade(log, turns, showPhrases);
   const { error: microphoneError, stopRecording } = useMicrophoneLevel(voiceOpen && !voiceTurn, orb);
   const inputBusy = busy || finishingRecording;
+  const voiceStatus = microphoneError || recordingStatus || (voiceTurn?.failed ? error : "") || speech.status;
 
   function sendText(text) {
     if (inputBusy) return;
@@ -54,32 +59,51 @@ export function LightSettings({ mode, onModeChange, chat, chatReply }) {
   }
 
   function closeVoice() {
+    pendingRecording.current?.abort();
     pendingRecording.current = null;
     setFinishingRecording(false);
     setRecordingStatus("");
-    setVoiceStart(null);
+    setVoiceMessageId(null);
+    setVoiceOpen(false);
   }
 
   async function toggleVoice() {
     if (inputBusy) return;
     setRecordingStatus("");
     if (!voiceOpen || voiceTurn) {
-      setVoiceStart({ last: turns.at(-1)?.id });
-    } else {
-      const recording = stopRecording();
-      if (!recording) {
-        setRecordingStatus("Запись ещё недоступна");
-        return;
-      }
-      pendingRecording.current = recording;
-      setFinishingRecording(true);
+      setVoiceMessageId(null);
+      setVoiceOpen(true);
+      return;
+    }
+
+    const recording = stopRecording();
+    if (!recording) {
+      setRecordingStatus("Запись ещё недоступна");
+      return;
+    }
+
+    const controller = new AbortController();
+    pendingRecording.current = controller;
+    setFinishingRecording(true);
+    try {
       const audio = await recording;
-      if (pendingRecording.current !== recording) return;
-      pendingRecording.current = null;
-      setFinishingRecording(false);
-      const turn = composeDemoVoiceTurn(audio);
-      if (turn) addVoice(turn);
-      else setRecordingStatus("Не удалось записать голосовое. Вернитесь в чат, чтобы написать просьбу.");
+      if (controller.signal.aborted) return;
+      const body = recordingUpload(audio ?? new Blob());
+      const result = await demoRequest("/voice/recordings", "POST", body, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      const id = newMessageId();
+      setVoiceMessageId(id);
+      void send(result.text, id, result.recording_id);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setRecordingStatus(demoError(error));
+        setVoiceOpen(false);
+      }
+    } finally {
+      if (pendingRecording.current === controller) {
+        pendingRecording.current = null;
+        setFinishingRecording(false);
+      }
     }
   }
 
@@ -96,16 +120,19 @@ export function LightSettings({ mode, onModeChange, chat, chatReply }) {
               {voiceTurn ? (
                 <p className="voice-question"><span className="visually-hidden">Вы: </span>{voiceTurn.text}</p>
               ) : (
-                <p className="voice-question">{finishingRecording ? "Голосовое сообщение" : "Чем вам помочь?"}</p>
+                <p className="voice-question">{finishingRecording ? "Распознаём речь…" : "Чем вам помочь?"}</p>
               )}
-              {(finishingRecording || (voiceTurn && !voiceReply)) && <Thinking className="voice-thinking" />}
+              {(voiceTurn && !voiceTurn.failed && !voiceReply) && <Thinking className="voice-thinking" />}
             </div>
             {voiceReply && (
               <p className="voice-reply">
                 <span className="visually-hidden">Номер: {voiceReply.reply}</span>
-                <span aria-hidden="true">{replyText}</span>
+                <span aria-hidden="true">{replyText ?? ""}</span>
               </p>
             )}
+            {voiceTurn?.failed && <button className="pill voice-action" type="button"
+              onClick={() => void send(voiceTurn.text, voiceTurn.id, voiceTurn.recordingId)}>Повторить отправку</button>}
+            {speech.ready && <button className="pill voice-action" type="button" onClick={() => void speech.play()}>Прослушать ответ</button>}
           </div>
         </>
       )}
@@ -117,7 +144,7 @@ export function LightSettings({ mode, onModeChange, chat, chatReply }) {
             <div className="chat-turn" key={turn.id ?? index}>
               <p className="guest-message"><span className="visually-hidden">Вы: </span><span className="guest-text">{turn.text}</span></p>
               {turn.failed ? (
-                <button className="pill" type="button" disabled={busy} onClick={() => void send(turn.text, turn.id)}>
+                <button className="pill" type="button" disabled={busy} onClick={() => void send(turn.text, turn.id, turn.recordingId)}>
                   Повторить отправку
                 </button>
               ) : turn.reply && index < turns.length - 1 ? (
@@ -134,8 +161,8 @@ export function LightSettings({ mode, onModeChange, chat, chatReply }) {
       <div className="light-controls">
         {!voiceOpen && error && <p className="microphone-status" role="status">{error}</p>}
         {!voiceOpen && loading && !turns.length && <p className="microphone-status" role="status">Загружаем переписку…</p>}
-        {voiceOpen && (microphoneError || recordingStatus) && (
-          <p className="microphone-status" role="status">{microphoneError || recordingStatus}</p>
+        {(voiceOpen ? voiceStatus : recordingStatus) && (
+          <p className="microphone-status" role="status">{voiceOpen ? voiceStatus : recordingStatus}</p>
         )}
         <div className="light-mode-row" hidden={voiceOpen}>
           <fieldset className="light-modes" id="light-modes" hidden={showPhrases}>

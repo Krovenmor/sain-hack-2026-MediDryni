@@ -50,12 +50,14 @@ export function useMicrophoneLevel(enabled, orb) {
         }
         stream = input;
         stream.getAudioTracks().forEach(track => track.addEventListener("ended", microphoneEnded, { once: true }));
-        recorder = new MediaRecorder(stream);
+        const format = ["audio/webm;codecs=opus", "audio/mp4", "audio/ogg;codecs=opus"]
+          .find(type => MediaRecorder.isTypeSupported?.(type));
+        recorder = new MediaRecorder(stream, format ? { mimeType: format } : undefined);
         const chunks = [];
         const recording = new Promise(resolve => {
           recorder.addEventListener("dataavailable", event => chunks.push(event.data));
           recorder.addEventListener("stop", () => {
-            resolve(disposed ? null : new Blob(chunks, { type: recorder.mimeType }));
+            resolve(disposed ? null : new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" }));
           }, { once: true });
           recorder.addEventListener("error", () => {
             resolve(null);
@@ -69,6 +71,7 @@ export function useMicrophoneLevel(enabled, orb) {
         stop.current = () => {
           if (recorder.state !== "recording") return null;
           recorder.stop();
+          release();
           return recording;
         };
         context = new AudioContext();

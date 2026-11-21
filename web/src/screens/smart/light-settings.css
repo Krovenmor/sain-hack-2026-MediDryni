@@ -226,6 +226,14 @@
   overflow: auto;
   animation: reveal-voice-reply 330ms ease both;
 }
+.voice-action {
+  font-size: .875rem;
+  margin-top: .65rem;
+}
+.voice-dialogue:has(.voice-action):not([data-answered="true"]) .voice-utterance {
+  top: 0;
+  transform: translateY(calc(-100% - .55rem));
+}
 .voice-thinking {
   position: absolute;
   inset-inline: 0;
