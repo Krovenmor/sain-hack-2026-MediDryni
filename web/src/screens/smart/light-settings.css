@@ -1,4 +1,5 @@
 .welcome.light-screen {
+  --chat-topbar-height: clamp(3.25rem, 8dvh, 4.5rem);
   height: 100dvh;
   overflow: clip;
   display: flex;
@@ -50,8 +51,10 @@
   font: 400 1.25rem/1.2 "Montserrat", sans-serif;
   color: white;
   border: 0;
+  outline: none;
   background: transparent;
 }
+.light-composer:has(input:focus-visible) { border-color: #fad28e; }
 .light-composer input::placeholder { color: white; text-shadow: var(--glow); opacity: 1; }
 .light-composer button { display: grid; place-items: center; padding: 0; }
 .voice-toggle { position: relative; z-index: 1; }
@@ -88,6 +91,7 @@
 }
 
 .light-screen .topbar, .light-controls { flex-shrink: 0; }
+.welcome.light-screen .topbar { min-height: var(--chat-topbar-height); }
 .light-settings { flex-direction: column; align-items: stretch; justify-content: end; min-height: 0; }
 .chat-log {
   flex: 1;
@@ -97,8 +101,13 @@
   overflow-y: auto;
   scrollbar-width: none;
   overscroll-behavior: contain;
-  padding-block: clamp(.25rem, 2.2dvh, 1.25rem) clamp(.45rem, 5dvh, 2.8rem);
+  overflow-anchor: none;
+  padding-block-end: clamp(.45rem, 5dvh, 2.8rem);
   font: 400 .875rem/1.8 "Montserrat", sans-serif;
+}
+.chat-log::before {
+  content: "";
+  flex: 0 0 max(.25rem, calc(50dvh - var(--chat-topbar-height) - env(safe-area-inset-top)));
 }
 .chat-turn { flex: none; display: grid; gap: 1rem; overflow-wrap: anywhere; }
 .chat-turn:first-child { margin-top: auto; }
@@ -129,6 +138,7 @@
 .quick-phrases-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
 .quick-phrases-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
 .light-composer button[type="submit"]:disabled { opacity: .5; }
+.light-composer button[type="submit"][data-empty="true"] { opacity: .25; }
 
 .light-screen .light-beam {
   filter: opacity(1);

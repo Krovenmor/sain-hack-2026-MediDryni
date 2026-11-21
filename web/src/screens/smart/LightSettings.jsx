@@ -41,6 +41,7 @@ export function LightSettings({ chat, chatReply }) {
   const voiceReply = voiceTurn?.reply ? voiceTurn : null;
   const speech = useReplySpeech(voiceReply?.replyId);
   const [draft, setDraft] = useState("");
+  const hasMessage = Boolean(draft.trim());
   const [finishingRecording, setFinishingRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState("");
   const pendingRecording = useRef(null);
@@ -144,7 +145,7 @@ export function LightSettings({ chat, chatReply }) {
         </>
       )}
       {turns.length ? (
-        <div className="chat-log" role="log" aria-label="Переписка" ref={log}>
+        <div className="chat-log" role="log" aria-label="Переписка" tabIndex={0} ref={log}>
           {cursor && <button type="button" className="pill chat-history" disabled={loading}
             onClick={() => void history(cursor)}>Ранние сообщения</button>}
           {turns.map((turn, index) => (
@@ -189,7 +190,8 @@ export function LightSettings({ chat, chatReply }) {
           {!voiceOpen && <>
             <input aria-label="Сообщение" placeholder="Сообщение" value={draft} maxLength={2000} disabled={inputBusy}
               onChange={event => setDraft(event.target.value)} />
-            <button type="submit" aria-label="Отправить сообщение" disabled={inputBusy || !draft.trim()}><img src={sendIcon} alt="" /></button>
+            <button type="submit" aria-label="Отправить сообщение" data-empty={!hasMessage}
+              disabled={inputBusy || !hasMessage}><img src={sendIcon} alt="" /></button>
           </>}
           <button className="voice-toggle" type="button" aria-label={voiceOpen && !voiceTurn ? "Отправить голосовое сообщение" : "Начать запись"}
             aria-pressed={voiceOpen} disabled={inputBusy} onClick={toggleVoice}>

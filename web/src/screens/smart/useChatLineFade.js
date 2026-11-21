@@ -24,7 +24,7 @@ export function useChatLineFade(log, turns, showPhrases) {
         for (let line = first; line < end; line++) {
           const center = rect.top + (line + 0.5) * lineHeight;
           const depth = Math.max(0, Math.min(1, (center - top) / (height * 0.8)));
-          const alpha = 0.07 + 0.93 * depth;
+          const alpha = 0.2 + 0.8 * depth;
           const start = textOffset + line * lineHeight;
           stops.push(`rgb(0 0 0 / ${alpha.toFixed(3)}) ${start}px ${start + lineHeight}px`);
         }
@@ -39,12 +39,15 @@ export function useChatLineFade(log, turns, showPhrases) {
     const first = turns[0]?.id;
     const tail = turns.at(-1)?.id;
     const previous = lastView.current;
-    const prepended = previous?.viewport === viewport && first !== previous.first && tail === previous.tail;
-    viewport.scrollTop = prepended ? previous.top + viewport.scrollHeight - previous.height : viewport.scrollHeight;
+    const sameLog = previous?.viewport === viewport;
+    const prepended = sameLog && first !== previous.first && tail === previous.tail;
+    let following = !sameLog || (!prepended && (tail !== previous.tail || previous.following));
+    if (following) viewport.scrollTop = viewport.scrollHeight;
+    else if (prepended) viewport.scrollTop = previous.top + viewport.scrollHeight - previous.height;
+    else viewport.scrollTop = previous.top;
     update();
-    let following = !prepended;
     function remember() {
-      lastView.current = { viewport, first, tail, top: viewport.scrollTop, height: viewport.scrollHeight };
+      lastView.current = { viewport, first, tail, following, top: viewport.scrollTop, height: viewport.scrollHeight };
     }
     remember();
     function onScroll() {
