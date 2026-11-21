@@ -3,10 +3,9 @@ import arrow from "../../../assets/manual-track-arrow.svg";
 import { ClimateDial, ManualSlider, ManualSwitch, TimeWheel } from "./ManualControls.jsx";
 import { PeriodTabs } from "../../components/PeriodTabs.jsx";
 import { formatTime, toggleLight } from "../../data/staySettings.js";
-import { tracks } from "./manualSettings.js";
 import "./manual-settings.css";
 
-function TrackPicker({ selected, onSelect, disabled }) {
+function TrackPicker({ tracks, selected, onSelect, disabled }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef(null);
   const expanded = open && !disabled;
@@ -48,7 +47,7 @@ function TrackPicker({ selected, onSelect, disabled }) {
   );
 }
 
-export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart }) {
+export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart, tracks, saving }) {
   const period = periods[selected];
   const { light } = period;
   const lit = light.brightness > 0;
@@ -60,7 +59,7 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
         <h1 id="manual-title">Ручная<br />настройка</h1>
         <PeriodTabs periods={periods} selected={selected} onSelect={onSelect} name="manual-period" />
       </header>
-      <div className="manual-card-grid">
+      <div className="manual-card-grid" inert={saving}>
         <div className="manual-row manual-row-top">
           <section className="manual-card manual-light" aria-labelledby="manual-light-title">
             <div className="manual-card-heading">
@@ -108,7 +107,7 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
             <ManualSlider label="Громкость" value={wakeUp.volume}
               onChange={volume => onAlarmChange({ volume })} disabled={!wakeUp.soundOn} />
           </div>
-          <TrackPicker key={selected} selected={wakeUp.track} onSelect={track => onAlarmChange({ track })} disabled={!wakeUp.soundOn} />
+          <TrackPicker tracks={tracks} key={selected} selected={wakeUp.track} onSelect={track => onAlarmChange({ track })} disabled={!wakeUp.soundOn} />
           <div className="manual-card-heading manual-alarm-light">
             <h3>сопровождение светом</h3>
             <ManualSwitch label="Сопровождение светом" checked={wakeUp.alarmLight} onChange={alarmLight => onAlarmChange({ alarmLight })} />

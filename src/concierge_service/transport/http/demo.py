@@ -2,21 +2,24 @@
 
 import re
 import secrets
+from contextlib import contextmanager
 from pathlib import Path
 from time import monotonic
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, SecretStr, StrictBool, StrictFloat, StrictInt
 
 from concierge_service.domain.dataset import DatasetError
+from concierge_service.domain.device_catalog import DeviceValueError
 from concierge_service.domain.sleep import SleepPlanError
 from concierge_service.infra.wire import Identifier
 from concierge_service.ports.hack_api import HackApiError
 from concierge_service.ports.room import RoomApiError
-from concierge_service.service.demo import DemoService
+from concierge_service.service.demo import DemoClient, DemoService
 
 
 _WEB = Path(__file__).resolve().parents[4] / "web"
@@ -35,6 +38,47 @@ class StartClient(BaseModel):
     dataset_code: Identifier
     stay_record_id: Identifier | None = None
     access_code: SecretStr | None = Field(default=None, max_length=256)
+
+
+class AlarmPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time: Annotated[str, Field(pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")] = "00:00"
+    enabled: Annotated[bool, Field(strict=True)] = False
+    soundOn: Annotated[bool, Field(strict=True)] = False
+    alarmLight: Annotated[bool, Field(strict=True)] = False
+    track: Annotated[str, Field(min_length=1)] = ""
+    volume: Annotated[int, Field(strict=True, ge=0, le=100)] = 0
+
+
+class SettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: Annotated[int, Field(strict=True, ge=0)]
+    periods: dict[
+        Literal["evening", "night", "morning", "day"],
+        dict[Literal["kelvin", "brightness", "temperature", "curtains", "doNotDisturb"], StrictInt | StrictFloat | StrictBool],
+    ] = Field(default_factory=dict)
+    alarm: AlarmPatch = Field(default_factory=AlarmPatch)
+
+
+class ClockPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    at: AwareDatetime | None = None
+    paused: Annotated[bool, Field(strict=True)] | None = None
+
+
+@contextmanager
+def demo_errors():
+    try:
+        yield
+    except HackApiError as exc:
+        raise HTTPException(exc.status_code, detail={"code": exc.code}) from None
+    except DeviceValueError:
+        raise HTTPException(422, detail={"code": "invalid_device_settings"}) from None
+    except RoomApiError:
+        raise HTTPException(502, detail={"code": "room_unavailable"}) from None
 
 
 class DemoAccess:
@@ -84,13 +128,45 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
                               request.client.host if request.client else "local")
         try:
             result = await service.start(key, payload.dataset_code, payload.stay_record_id)
-            response = JSONResponse(result, headers=_PRIVATE)
+            response = JSONResponse(jsonable_encoder(result), headers=_PRIVATE)
         except HackApiError as exc:
             response = JSONResponse({"detail": {"code": exc.code}}, exc.status_code, headers=_PRIVATE)
         except (RoomApiError, DatasetError, SleepPlanError):
             response = JSONResponse({"detail": {"code": "invalid_room_or_plan"}}, 502, headers=_PRIVATE)
         response.set_cookie(_COOKIE, ticket, httponly=True, secure=True, samesite="strict", path="/demo")
         return response
+
+    async def get_client_session(key: Annotated[str, Depends(client_key)]) -> DemoClient:
+        with demo_errors():
+            return service.get_client_session(key)
+
+    @app.get("/api/v1/stay/current")
+    async def current(client: Annotated[DemoClient, Depends(get_client_session)]):
+        return client.current()
+
+    @app.patch("/api/v1/stay/current")
+    async def save_settings(payload: SettingsPatch, key: Annotated[str, Depends(client_key)],
+                            client: Annotated[DemoClient, Depends(get_client_session)]):
+        with demo_errors():
+            return await service.update_settings(
+                key, client, payload.revision, payload.periods, payload.alarm.model_dump(exclude_unset=True),
+            )
+
+    @app.get("/api/v1/demo/clock")
+    async def read_clock(client: Annotated[DemoClient, Depends(get_client_session)]):
+        return client.clock.view()
+
+    @app.patch("/api/v1/demo/clock")
+    async def set_clock(payload: ClockPatch, key: Annotated[str, Depends(client_key)],
+                        client: Annotated[DemoClient, Depends(get_client_session)]):
+        with demo_errors():
+            return await service.update_clock(key, client, payload.at, payload.paused)
+
+    @app.get("/api/v1/room/state")
+    async def room_state(client: Annotated[DemoClient, Depends(get_client_session)],
+                         at: Annotated[AwareDatetime | None, Query()] = None):
+        with demo_errors():
+            return await service.room_state(client, at)
 
     class PrivateBuild(StaticFiles):
         async def __call__(self, scope, receive, send):

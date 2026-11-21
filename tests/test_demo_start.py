@@ -31,6 +31,7 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.room_ids = {}
         self.calls = []
         self.scenarios = []
+        self.room_scenarios = {}
         self.fail_publish = False
         self.closed_rooms = set()
         self.until = timedelta(hours=18)
@@ -64,6 +65,16 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
             if data is None:
                 return httpx.Response(404)
             return httpx.Response(200, json={"dataset": data, "reference": None})
+        if request.method == "GET" and path.endswith("/state"):
+            sid = path.split("/")[2]
+            at = datetime.fromisoformat(request.url.params["at"])
+            state = {"climate": {"temperature_c": 23}}
+            for step in self.room_scenarios[sid]:
+                if datetime.fromisoformat(step["at"]) <= at:
+                    state.setdefault(step["device_id"], {}).update(step["values"])
+            return httpx.Response(200, json={
+                "session_id": sid, "room_id": sid, "at": at.isoformat(), "state": state,
+            })
         body = json.loads(request.content)
         if path == "/runs":
             if body == {"case": 2, "stage": "final"}:
@@ -99,12 +110,18 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(503)
         self.scenarios.append(body["steps"])
         sid = path.split("/")[2]
+        self.room_scenarios[sid] = body["steps"]
         return httpx.Response(200, json={"session_id": sid, "room_id": sid,
                                         "at": self.check_in.isoformat(), "state": {"light": {"brightness": 70}}})
 
     async def start(self, number=1, **fields):
         return await self.api.post("/api/v1/run_client", headers={"Authorization": f"Bearer {number:064x}"},
                                    json={"dataset_code": "case2-test-v1", **fields})
+
+    def assert_same_stay(self, actual, expected):
+        self.assertEqual(actual["status"], expected["status"])
+        self.assertEqual({k: v for k, v in actual["stay"].items() if k != "clock"},
+                         {k: v for k, v in expected["stay"].items() if k != "clock"})
 
     async def test_wildcard_address_redirects_to_localhost(self):
         response = await self.api.get("http://0.0.0.0:8000/")
@@ -161,7 +178,7 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.calls.count("/case/2/getData"), 1)
         self.assertEqual(self.hints.await_count, 1)
         before = list(self.calls)
-        self.assertEqual((await self.start()).json(), responses[0].json())
+        self.assert_same_stay((await self.start()).json(), responses[0].json())
         self.assertEqual(self.calls, before)
         self.assertEqual((await self.start(6, access_code="show-code", stay_record_id="stay_1")).json()
                          ["detail"]["code"], "demo_full")
@@ -230,7 +247,7 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         alarm = next(step for step in expected if step["device_id"] == "alarm")
         self.assertEqual(alarm["values"]["at"], data["stays"][0]["target_wake_at"])
         before = self.calls.copy()
-        self.assertEqual((await self.start(dataset_code="final-code")).json(), responses[0].json())
+        self.assert_same_stay((await self.start(dataset_code="final-code")).json(), responses[0].json())
         self.assertEqual(self.calls, before)
 
     async def test_final_retry_continues_from_confirmed_run_and_session(self):
@@ -280,3 +297,74 @@ class DemoStartTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.start(**args)).json()["detail"]["code"], "show_ended")
         self.assertEqual((await self.api.get("/demo/room.js")).status_code, 410)
         self.assertEqual(self.calls.count("/runs"), 1)
+
+    async def room_request(self, method, path, number=1, **kwargs):
+        return await self.api.request(method, f"/api/v1{path}",
+                                      headers={"Authorization": f"Bearer {number:064x}"}, **kwargs)
+
+    async def test_settings_publish_once_preserve_other_periods_and_resume(self):
+        data = self.final_dataset()
+        for n in (1, 2):
+            response = await self.start(n, dataset_code="final-code", access_code="show-code")
+            self.assertEqual(response.status_code, 200, response.text)
+        payload = {"revision": 0, "periods": {"night": {"temperature": 19}}, "alarm": {"time": "06:30"}}
+        self.fail_publish = True
+        self.assertEqual((await self.room_request("PATCH", "/stay/current", json=payload)).status_code, 502)
+        self.assertEqual((await self.room_request("GET", "/stay/current")).json()["revision"], 0)
+        self.fail_publish = False
+        responses = await asyncio.gather(*(self.room_request("PATCH", "/stay/current", json=payload)
+                                           for _ in range(2)))
+        self.assertEqual(sorted(r.status_code for r in responses), [200, 409])
+        result = next(r.json() for r in responses if r.status_code == 200)
+        self.assertEqual(result["revision"], 1)
+        self.assertEqual(result["periods"][1]["temperature"], 19)
+        self.assertEqual(result["wakeUp"]["time"], "06:30")
+        self.assertEqual((await self.start(dataset_code="final-code")).json()["stay"]["revision"], 1)
+        other = (await self.room_request("GET", "/stay/current", 2)).json()
+        self.assertEqual(other["revision"], 0)
+        self.assertEqual(other["wakeUp"]["time"], "07:00")
+        self.assertEqual(result["periods"][2], other["periods"][2])
+        self.assertEqual(len(self.scenarios), 3)
+        client = self.service.clients[f"{1:064x}"]
+        night = client.plan.boundaries[1]
+        for at, expected in ((night - timedelta(seconds=1), 23), (night, 19), (client.plan.boundaries[2], 17.5)):
+            state = await self.room_request("GET", "/room/state", params={"at": at.isoformat()})
+            self.assertEqual(state.json()["state"]["climate"]["temperature_c"], expected)
+            self.assertIn("06:30", state.json()["state"]["alarm"]["at"])
+        self.assertEqual(data["stays"][0]["target_wake_at"][11:16], "07:00")
+
+    async def test_clock_rewinds_and_snapshot_does_not_move_time(self):
+        self.assertEqual((await self.room_request("GET", "/stay/current")).status_code, 401)
+        self.assertEqual((await self.start(access_code="show-code")).status_code, 200)
+        clock = (await self.room_request("GET", "/demo/clock")).json()
+        start = datetime.fromisoformat(clock["min"])
+        end = datetime.fromisoformat(clock["max"])
+        target = start + timedelta(hours=2)
+        paused = await self.room_request("PATCH", "/demo/clock", json={"at": target.isoformat(), "paused": True})
+        self.assertEqual(paused.json()["now"], target.isoformat())
+        self.assertTrue(paused.json()["paused"])
+        snapshot = await self.room_request("GET", "/room/state", params={"at": end.isoformat()})
+        self.assertEqual(snapshot.json()["at"], end.isoformat())
+        self.assertIn("07:00", snapshot.json()["state"]["alarm"]["at"])
+        self.assertEqual((await self.room_request("GET", "/demo/clock")).json(), paused.json())
+        self.assertEqual((await self.room_request("PATCH", "/demo/clock",
+                                                 json={"at": (end + timedelta(seconds=1)).isoformat()})).status_code, 422)
+        rewind = await self.room_request("PATCH", "/demo/clock", json={"at": start.isoformat()})
+        self.assertEqual(rewind.json()["now"], start.isoformat())
+        self.assertTrue(rewind.json()["paused"])
+        self.assertTrue((await self.room_request("PATCH", "/demo/clock", json={"at": end.isoformat()})).json()["paused"])
+        resumed = await self.room_request("PATCH", "/demo/clock", json={"at": start.isoformat(), "paused": False})
+        self.assertFalse(resumed.json()["paused"])
+
+    async def test_invalid_settings_do_not_publish(self):
+        await self.start(access_code="show-code")
+        for payload in (
+            {"periods": {"night": {"temperature": 99}}},
+            {"periods": {"night": {"curtains": True}}},
+            {"periods": {"unknown": {"temperature": 18}}},
+            {"alarm": {"time": "12:00"}},
+            {"alarm": {"track": "unknown", "enabled": False}},
+        ):
+            response = await self.room_request("PATCH", "/stay/current", json={"revision": 0, **payload})
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(len(self.scenarios), 1)

@@ -118,3 +118,19 @@ dialog::backdrop { background: rgb(15 1 6 / 60%); }
   white-space: nowrap;
   border: 0;
 }
+
+.demo-clock, .demo-save {
+  font: .85rem/1.4 "Montserrat", sans-serif;
+  margin: .5rem 0;
+}
+.demo-clock > div, .demo-save {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+}
+.demo-clock label { flex: 1 1 6rem; min-width: 0; }
+.demo-clock input { width: 100%; }
+.demo-clock .pill, .demo-save .pill { padding: .3rem .65rem; min-height: 2rem; }
+.demo-clock button:disabled, .demo-save button:disabled { opacity: .55; }
+.demo-save [role="status"] { flex-basis: 100%; margin: 0; }
