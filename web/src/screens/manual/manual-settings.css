@@ -159,6 +159,8 @@
 .climate-dial:focus-visible, .time-wheel:focus-visible { outline: 1px solid #fad28e; outline-offset: -3px; }
 
 .manual-alarm { padding: .4375rem .6875rem 1.8125rem; }
+.manual-alarm-options { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.manual-alarm-options:disabled { opacity: .45; }
 .alarm-time {
   position: relative;
   display: grid;
@@ -176,7 +178,6 @@
   border-block: 1px solid white;
   pointer-events: none;
 }
-.alarm-time[data-disabled="true"] { opacity: .45; }
 .time-wheel {
   position: relative;
   height: 100%;

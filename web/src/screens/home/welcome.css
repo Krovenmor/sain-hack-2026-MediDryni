@@ -94,6 +94,7 @@
   container-type: inline-size;
   gap: var(--card-gap);
   margin-right: .1875rem;
+  padding-block: clamp(.25rem, .8dvh, .5rem);
 }
 .period {
   flex: 0 0 18.2%;
@@ -104,13 +105,14 @@
   min-height: clamp(13rem, calc(37dvh - 1rem), 21.625rem);
   padding: 1px;
   border-radius: 1.25rem;
-  transition: flex-basis 240ms var(--ease), background-color 240ms ease;
+  transition: flex-basis 280ms var(--ease), background-color 280ms ease;
 }
 .period-outline {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
+  overflow: visible;
   pointer-events: none;
 }
 .period-outline rect {
@@ -146,7 +148,7 @@
   opacity: 0;
   visibility: hidden;
 }
-.expanded .period-content { opacity: 1; visibility: visible; transition: opacity 140ms ease-out 80ms; }
+.expanded .period-content { opacity: 1; visibility: visible; transition: opacity 160ms ease-out 95ms; }
 .period-content h3 { font-size: 2.25rem; font-weight: bold; line-height: 1.28; }
 .card-rule { display: block; width: calc(100% - .45rem); height: 1px; margin: .45rem 0 clamp(.4rem, 1.75dvh, 1rem); }
 .settings {
