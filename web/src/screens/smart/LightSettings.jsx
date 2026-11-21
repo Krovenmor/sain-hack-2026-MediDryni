@@ -5,7 +5,6 @@ import microphone from "../../../assets/microphone.svg";
 import voiceBack from "../../../assets/voice-back.svg";
 import { VoiceLight } from "./VoiceLight.jsx";
 import voiceOrb from "../../../assets/voice-orb.png";
-import { lightModes } from "../../components/LightBeam.jsx";
 
 import { useChatLineFade } from "./useChatLineFade.js";
 import { useMicrophoneLevel } from "./useMicrophoneLevel.js";
@@ -32,7 +31,7 @@ function RoomReply({ turn, text = turn.reply }) {
   );
 }
 
-export function LightSettings({ mode, onModeChange, chat, chatReply }) {
+export function LightSettings({ chat, chatReply }) {
   const { turns, send, cursor, loading, error, history } = chat;
   const [showPhrases, setShowPhrases] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -164,21 +163,11 @@ export function LightSettings({ mode, onModeChange, chat, chatReply }) {
         {(voiceOpen ? voiceStatus : recordingStatus) && (
           <p className="microphone-status" role="status">{voiceOpen ? voiceStatus : recordingStatus}</p>
         )}
-        <div className="light-mode-row" hidden={voiceOpen}>
-          <fieldset className="light-modes" id="light-modes" hidden={showPhrases}>
-            <legend className="visually-hidden">Цвет света</legend>
-            {lightModes.map(({ id, name, swatch, kelvin }) => (
-              <label key={id} style={{ "--swatch": swatch }}>
-                <input className="visually-hidden" type="radio" name="light-color" value={id} checked={mode === id}
-                  onChange={() => onModeChange(kelvin)} />
-                <span>{name}</span>
-              </label>
-            ))}
-          </fieldset>
+        <div className="quick-phrases-row" hidden={voiceOpen}>
           {showPhrases && <div className="quick-phrases" id="quick-phrases">
             {quickPhrases.map(phrase => <button key={phrase} type="button" disabled={busy} onClick={() => sendText(phrase)}>{phrase}</button>)}
           </div>}
-          <button className="light-mode-toggle" type="button" aria-label="Быстрые фразы"
+          <button className="quick-phrases-toggle" type="button" aria-label="Быстрые фразы"
             aria-expanded={showPhrases} aria-controls={showPhrases ? "quick-phrases" : undefined} onClick={() => setShowPhrases(open => !open)}>
             <span /><span />
           </button>

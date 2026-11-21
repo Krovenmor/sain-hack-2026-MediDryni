@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { demoError, demoRequest } from "../../data/demoApi.js";
 import { turnsFromMessages } from "./chat.js";
 
-export function useRoomChat(open, onStay) {
+export function useRoomChat(open, onStay, saveRoomSettings) {
   const [turns, setTurns] = useState([]);
   const [cursor, setCursor] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -49,6 +49,11 @@ export function useRoomChat(open, onStay) {
     setError("");
     setTurns(previous => [...previous.filter(turn => turn.id !== id), { id, text, recordingId, reply: null }]);
     try {
+      if (!(await saveRoomSettings())) {
+        setTurns(previous => previous.map(turn => turn.id === id ? { ...turn, failed: true } : turn));
+        setError("Не удалось сохранить ручные настройки перед отправкой сообщения.");
+        return;
+      }
       const source = recordingId ? { recording_id: recordingId } : { text };
       const result = await demoRequest("/messages", "POST", { client_message_id: id, ...source });
       setTurns(previous => previous.map(turn => turn.id === id

@@ -14,6 +14,28 @@ export function settingsPatch(stay, periodDrafts, alarmDraft) {
   return { revision: stay.revision, periods, alarm: editedFields(alarmDraft, stay.wakeUp) };
 }
 
+export function applySettingsChanges(stay, { periods, alarm }) {
+  return {
+    ...stay,
+    periods: stay.periods.map((period, index) => {
+      const changes = periods[periodIds[index]];
+      if (!changes) return period;
+      const { kelvin, brightness, previousBrightness, ...fields } = changes;
+      return {
+        ...period,
+        ...fields,
+        light: {
+          ...period.light,
+          kelvin: kelvin ?? period.light.kelvin,
+          brightness: brightness ?? period.light.brightness,
+          previousBrightness: previousBrightness ?? period.light.previousBrightness,
+        },
+      };
+    }),
+    wakeUp: { ...stay.wakeUp, ...alarm },
+  };
+}
+
 export function updatePeriod(stay, index, changes) {
   return {
     ...stay,

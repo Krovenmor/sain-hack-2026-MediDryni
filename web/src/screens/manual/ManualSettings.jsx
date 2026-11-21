@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import arrow from "../../../assets/manual-track-arrow.svg";
+import dndHand from "../../../assets/manual-dnd-hand.svg";
 import { ClimateDial, ManualSlider, ManualSwitch, TimeWheel } from "./ManualControls.jsx";
 import { PeriodTabs } from "../../components/PeriodTabs.jsx";
 import { formatTime, toggleLight } from "../../data/staySettings.js";
@@ -47,7 +48,7 @@ function TrackPicker({ tracks, selected, onSelect, disabled }) {
   );
 }
 
-export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart, tracks, saving }) {
+export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart, tracks }) {
   const period = periods[selected];
   const { light } = period;
   const lit = light.brightness > 0;
@@ -59,7 +60,7 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
         <h1 id="manual-title">Ручная<br />настройка</h1>
         <PeriodTabs periods={periods} selected={selected} onSelect={onSelect} name="manual-period" />
       </header>
-      <div className="manual-card-grid" inert={saving}>
+      <div className="manual-card-grid">
         <div className="manual-row manual-row-top">
           <section className="manual-card manual-light" aria-labelledby="manual-light-title">
             <div className="manual-card-heading">
@@ -77,7 +78,8 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
           </section>
         </div>
         <div className="manual-row manual-row-middle">
-          <section className="manual-card manual-dnd" aria-labelledby="manual-dnd-title">
+          <section className="manual-card manual-dnd" aria-labelledby="manual-dnd-title" data-active={period.doNotDisturb}>
+            <img className="manual-dnd-hand" src={dndHand} width="106" height="128" alt="" />
             <h2 id="manual-dnd-title">не<br />беспокоить</h2>
             <ManualSwitch label="Не беспокоить" checked={period.doNotDisturb} onChange={doNotDisturb => onPeriodChange({ doNotDisturb })} />
           </section>

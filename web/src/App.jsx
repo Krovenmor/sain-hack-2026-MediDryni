@@ -7,80 +7,53 @@ import { useRoomChat } from "./screens/smart/useRoomChat.js";
 import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
-import { demoError, demoRequest } from "./data/demoApi.js";
-import { periodIds, settingsPatch } from "./data/staySettings.js";
-import { DemoClock, useDemoClock } from "./components/DemoClock.jsx";
+import { applySettingsChanges, periodIds, settingsPatch } from "./data/staySettings.js";
+import { useDemoClock } from "./components/DemoClock.jsx";
 import { Scenario } from "./screens/scenario/Scenario.jsx";
 import { Welcome } from "./screens/home/Welcome.jsx";
+import { useStaySettings } from "./data/useStaySettings.js";
 import { Navigation } from "./components/Navigation.jsx";
 
 export function App({ stay: initialStay }) {
-  const [stay, setStay] = useState(initialStay);
+  const { stay, acceptStay, queueChanges, notice, retry } = useStaySettings(initialStay);
   const [periodChanges, setPeriodChanges] = useState({});
   const [alarmChanges, setAlarmChanges] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState("");
   const [selected, setSelected] = useState(0);
   const [screen, setScreen] = useState("home");
-  const roomClock = useDemoClock(initialStay.clock, screen === "home" || screen === "scenario");
+  const roomClock = useDemoClock(initialStay.clock, screen === "home");
+  const currentPeriod = periodIds.indexOf(roomClock.clock.period);
+  const firstHomePeriod = currentPeriod > 0 ? 1 : 0;
+  const homeSelected = selected >= firstHomePeriod && selected < firstHomePeriod + 3
+    ? selected
+    : Math.max(firstHomePeriod, currentPeriod);
   const periodId = periodIds[selected];
-  const patch = settingsPatch(stay, periodChanges, alarmChanges);
-  const dirty = Object.keys(patch.periods).length > 0 || Object.keys(patch.alarm).length > 0;
-  const draft = screen === "manual" || screen === "light";
-  const periods = stay.periods.map((period, index) => {
-    const { kelvin, brightness, previousBrightness, ...changes } = periodChanges[periodIds[index]] ?? {};
-    return {
-      ...period,
-      ...changes,
-      light: { kelvin: kelvin ?? period.light.kelvin, brightness: brightness ?? period.light.brightness,
-               previousBrightness: previousBrightness ?? period.light.previousBrightness },
-    };
-  });
-  const wakeUp = { ...stay.wakeUp, ...alarmChanges };
-  const { kelvin } = (draft ? periods : stay.periods)[selected].light;
+  const manual = applySettingsChanges(stay, { periods: periodChanges, alarm: alarmChanges });
+  const { kelvin } = (screen === "manual" ? manual : stay).periods[selected].light;
   const lightMode = kelvin < 3100 ? "warm" : kelvin < 5250 ? "neutral" : "cold";
-  const chat = useRoomChat(screen === "light", view => {
-    setStay(previous => view.revision >= previous.revision ? view : previous);
-  });
+  const chat = useRoomChat(screen === "light", acceptStay, retry);
   const chatReply = useChatReply(chat.turns.at(-1));
   const menu = useRef(null);
   function navigate(nextScreen) {
     if (menu.current.open) menu.current.close();
     if (nextScreen === screen) return;
-    if (nextScreen === "home" && selected >= 3) setSelected(0);
+    if (screen === "manual") queueManualChanges();
+    if (screen === "home") setSelected(homeSelected);
     setScreen(nextScreen);
     window.scrollTo(0, 0);
+  }
+  function selectManualPeriod(index) {
+    if (index === selected) return;
+    queueManualChanges();
+    setSelected(index);
   }
   function changePeriod(changes) {
     setPeriodChanges(previous => ({ ...previous, [periodId]: { ...previous[periodId], ...changes } }));
   }
 
-  function discard() {
+  function queueManualChanges() {
+    queueChanges(settingsPatch(stay, periodChanges, alarmChanges));
     setPeriodChanges({});
     setAlarmChanges({});
-  }
-
-  async function save() {
-    setSaving(true);
-    setNotice("");
-    try {
-      setStay(await demoRequest("/stay/current", "PATCH", patch));
-      discard();
-      setNotice("Настройки сохранены.");
-    } catch (error) {
-      if (error.status === 409) {
-        try {
-          setStay(await demoRequest("/stay/current"));
-          setNotice("Настройки изменились в другой вкладке. Проверьте свои правки перед повторным сохранением.");
-        } catch (refreshError) {
-          setNotice(demoError(refreshError));
-        }
-      } else {
-        setNotice(demoError(error));
-      }
-    } finally {
-      setSaving(false);
-    }
   }
 
   return (
@@ -98,35 +71,27 @@ export function App({ stay: initialStay }) {
           </button>
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
-        {draft && (dirty || notice) && (
-          <div className="demo-save">
-            {dirty && <>
-              <button type="button" className="pill" disabled={saving} onClick={save}>
-                {saving ? "Сохраняем…" : "Сохранить настройки"}
-              </button>
-              <button type="button" className="pill" disabled={saving} onClick={() => { discard(); setNotice(""); }}>Отменить</button>
-            </>}
-            {notice && <p role="status">{notice}</p>}
+        {notice && (
+          <div className="demo-save-status">
+            <p role="status">{notice}</p>
+            <button type="button" className="pill" onClick={retry}>Повторить</button>
           </div>
         )}
         {screen === "light" && (
-          <LightSettings mode={lightMode} onModeChange={kelvin => { if (!saving) changePeriod({ kelvin }); }} chat={chat} chatReply={chatReply} />
+          <LightSettings chat={chat} chatReply={chatReply} />
         )}
         {screen === "scenario" && (
-          <>
-            <DemoClock {...roomClock} />
-            <Scenario periods={stay.periods} selected={selected} onSelect={setSelected} wakeUp={stay.wakeUp} />
-          </>
+          <Scenario periods={stay.periods} selected={selected} onSelect={setSelected} wakeUp={stay.wakeUp} />
         )}
         {screen === "manual" && (
-          <ManualSettings periods={periods} selected={selected} onSelect={setSelected}
-            wakeUp={wakeUp} tracks={stay.tracks} onPeriodChange={changePeriod} onLightChange={changePeriod}
+          <ManualSettings periods={manual.periods} selected={selected} onSelect={selectManualPeriod}
+            wakeUp={manual.wakeUp} tracks={stay.tracks} onPeriodChange={changePeriod} onLightChange={changePeriod}
             onAlarmChange={changes => setAlarmChanges(previous => ({ ...previous, ...changes }))}
-            saving={saving} onShowSmart={() => navigate("light")} />
+            onShowSmart={() => navigate("light")} />
         )}
         {screen === "home" && (
-          <Welcome stay={stay} currentPeriod={periodIds.indexOf(roomClock.clock.period)}
-            selected={selected} setSelected={setSelected} showPlan={() => navigate("scenario")}
+          <Welcome stay={stay} roomClock={roomClock} currentPeriod={currentPeriod} firstPeriod={firstHomePeriod}
+            selected={homeSelected} setSelected={setSelected} showPlan={() => navigate("scenario")}
             showManual={() => navigate("manual")} showSmart={() => navigate("light")} />
         )}
       </main>

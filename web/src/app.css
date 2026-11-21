@@ -119,18 +119,17 @@ dialog::backdrop { background: rgb(15 1 6 / 60%); }
   border: 0;
 }
 
-.demo-clock, .demo-save {
-  font: .85rem/1.4 "Montserrat", sans-serif;
-  margin: .5rem 0;
-}
-.demo-clock > div, .demo-save {
+.demo-save-status {
+  position: absolute;
+  z-index: 2;
+  top: calc(env(safe-area-inset-top) + 4.5rem);
+  inset-inline: var(--screen-gutter);
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: .5rem;
+  padding: .5rem .75rem;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: .75rem;
+  background: var(--wine);
+  font: .85rem/1.4 "Montserrat", sans-serif;
 }
-.demo-clock label { flex: 1 1 6rem; min-width: 0; }
-.demo-clock input { width: 100%; }
-.demo-clock .pill, .demo-save .pill { padding: .3rem .65rem; min-height: 2rem; }
-.demo-clock button:disabled, .demo-save button:disabled { opacity: .55; }
-.demo-save [role="status"] { flex-basis: 100%; margin: 0; }

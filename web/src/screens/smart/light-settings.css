@@ -17,33 +17,9 @@
   text-shadow: 0 0 5px white;
 }
 .light-controls { width: 100%; }
-.light-mode-row { display: flex; justify-content: flex-end; align-items: center; gap: .5rem; margin-bottom: .5rem; }
-.light-mode-row[hidden] { display: none; }
-.light-modes:not([hidden]) { display: flex; gap: .25rem; }
-.light-modes { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.light-modes label { position: relative; cursor: pointer; }
-.light-modes label span {
-  display: flex;
-  align-items: center;
-  gap: .3rem;
-  min-height: 2.5rem;
-  padding: .25rem clamp(.3rem, 1.15vw, .5rem);
-  border: 1px solid rgb(255 255 255 / 40%);
-  background: rgb(32 2 11 / 75%);
-  border-radius: .65rem;
-  font: 400 clamp(.65rem, 3vw, .79rem)/1.15 "Montserrat", sans-serif;
-}
-.light-modes label span::before {
-  content: "";
-  width: .45rem;
-  height: .45rem;
-  flex: 0 0 auto;
-  background: var(--swatch);
-  border-radius: 50%;
-}
-.light-modes input:checked + span { border-color: var(--swatch); background: rgb(255 255 255 / 16%); }
-.light-modes input:focus-visible + span { outline: 2px solid var(--swatch); outline-offset: 2px; }
-.light-mode-toggle {
+.quick-phrases-row { display: flex; justify-content: flex-end; align-items: end; gap: .5rem; margin-bottom: .5rem; }
+.quick-phrases-row[hidden] { display: none; }
+.quick-phrases-toggle {
   width: 2.5rem;
   height: 2.5rem;
   flex: 0 0 auto;
@@ -53,7 +29,7 @@
   border: 1px solid white;
   border-radius: .625rem;
 }
-.light-mode-toggle span {
+.quick-phrases-toggle span {
   height: .625rem;
   border: 1px solid white;
   border-radius: 1rem;
@@ -150,9 +126,8 @@
   background: rgb(255 255 255 / 20%);
 }
 .quick-phrases button:first-child { grid-column: span 2; }
-.light-mode-row { align-items: end; }
-.light-mode-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
-.light-mode-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
+.quick-phrases-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
+.quick-phrases-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
 .light-composer button[type="submit"]:disabled { opacity: .5; }
 
 .light-screen .light-beam {

@@ -107,14 +107,15 @@ export function ClimateDial({ value, onChange }) {
   const { dragging, offset, handlers } = useSpinControl({
     value, onChange, min: 16, max: 26, axis: "x", pixelsPerStep: 12,
   });
-  const angle = -3.5 * (value - 16 + offset / 12);
+  const angle = -9 * (value - 16 + offset / 12);
   return (
     <div className="climate-dial" role="spinbutton" aria-label="Температура воздуха" tabIndex={0}
       aria-valuemin={16} aria-valuemax={26} aria-valuenow={value} aria-valuetext={`${value} °C`}
       data-dragging={dragging} {...handlers}>
       <span>{value}°С</span>
-      <div className="climate-dial-rotation" style={{ "--dial-angle": `${angle}deg` }} aria-hidden="true">
-        <div className="climate-dial-mask" style={{ "--climate-mask": `url("${climateMask}")` }}>
+      <div className="climate-dial-window" aria-hidden="true">
+        <div className="climate-dial-rotation"
+          style={{ "--dial-angle": `${angle}deg`, "--climate-mask": `url("${climateMask}")` }}>
           <img src={climateColor} width="250" height="250" alt="" />
         </div>
       </div>
