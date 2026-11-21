@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from time import monotonic
 from uuid import UUID
 
@@ -82,6 +83,32 @@ class RequestHandler:
             duration_ms=round((monotonic() - started) * 1000),
         )
         return RequestAnswer(request.record_id, str(session.session_id), replies, applied)
+
+    async def handle_interactive(
+        self, request: Request, context: RequestContext,
+        execute: Callable[[RequestInterpretation], Awaitable[tuple[RequestOutcome, dict]]],
+    ) -> tuple[RequestOutcome, str, dict]:
+        intent = None
+        applied = {}
+        try:
+            deadline = asyncio.get_running_loop().time() + _INTERPRETATION_TIMEOUT_S
+            interpreted = await self._interpret(request, context, deadline)
+            intent = interpreted.intent
+            if intent in ("medical", "out_of_scope"):
+                outcome = intent
+            elif isinstance(interpreted, InvalidValueInterpretation):
+                outcome = interpreted.slots.reason
+            elif interpreted.timing == "clarify":
+                outcome = "clarify_time"
+            else:
+                outcome, applied = await execute(interpreted)
+        except AiAgentError as exc:
+            outcome = "missing_history" if exc.code == "unresolved_reference" else "unrecognized"
+        except TimeoutError:
+            outcome = "unrecognized"
+        except ActionPlanError as exc:
+            outcome = exc.reason
+        return outcome, compose_replies(request, outcome, intent=intent)[0].text, applied
 
     async def _resolve(
         self,

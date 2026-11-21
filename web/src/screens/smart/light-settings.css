@@ -1,4 +1,5 @@
 .welcome.light-screen {
+  --chat-topbar-height: clamp(3.25rem, 8dvh, 4.5rem);
   height: 100dvh;
   overflow: clip;
   display: flex;
@@ -17,33 +18,9 @@
   text-shadow: 0 0 5px white;
 }
 .light-controls { width: 100%; }
-.light-mode-row { display: flex; justify-content: flex-end; align-items: center; gap: .5rem; margin-bottom: .5rem; }
-.light-mode-row[hidden] { display: none; }
-.light-modes:not([hidden]) { display: flex; gap: .25rem; }
-.light-modes { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
-.light-modes label { position: relative; cursor: pointer; }
-.light-modes label span {
-  display: flex;
-  align-items: center;
-  gap: .3rem;
-  min-height: 2.5rem;
-  padding: .25rem clamp(.3rem, 1.15vw, .5rem);
-  border: 1px solid rgb(255 255 255 / 40%);
-  background: rgb(32 2 11 / 75%);
-  border-radius: .65rem;
-  font: 400 clamp(.65rem, 3vw, .79rem)/1.15 "Montserrat", sans-serif;
-}
-.light-modes label span::before {
-  content: "";
-  width: .45rem;
-  height: .45rem;
-  flex: 0 0 auto;
-  background: var(--swatch);
-  border-radius: 50%;
-}
-.light-modes input:checked + span { border-color: var(--swatch); background: rgb(255 255 255 / 16%); }
-.light-modes input:focus-visible + span { outline: 2px solid var(--swatch); outline-offset: 2px; }
-.light-mode-toggle {
+.quick-phrases-row { display: flex; justify-content: flex-end; align-items: end; gap: .5rem; margin-bottom: .5rem; }
+.quick-phrases-row[hidden] { display: none; }
+.quick-phrases-toggle {
   width: 2.5rem;
   height: 2.5rem;
   flex: 0 0 auto;
@@ -53,7 +30,7 @@
   border: 1px solid white;
   border-radius: .625rem;
 }
-.light-mode-toggle span {
+.quick-phrases-toggle span {
   height: .625rem;
   border: 1px solid white;
   border-radius: 1rem;
@@ -74,8 +51,10 @@
   font: 400 1.25rem/1.2 "Montserrat", sans-serif;
   color: white;
   border: 0;
+  outline: none;
   background: transparent;
 }
+.light-composer:has(input:focus-visible) { border-color: #fad28e; }
 .light-composer input::placeholder { color: white; text-shadow: var(--glow); opacity: 1; }
 .light-composer button { display: grid; place-items: center; padding: 0; }
 .voice-toggle { position: relative; z-index: 1; }
@@ -112,6 +91,7 @@
 }
 
 .light-screen .topbar, .light-controls { flex-shrink: 0; }
+.welcome.light-screen .topbar { min-height: var(--chat-topbar-height); }
 .light-settings { flex-direction: column; align-items: stretch; justify-content: end; min-height: 0; }
 .chat-log {
   flex: 1;
@@ -121,8 +101,13 @@
   overflow-y: auto;
   scrollbar-width: none;
   overscroll-behavior: contain;
-  padding-block: clamp(.25rem, 2.2dvh, 1.25rem) clamp(.45rem, 5dvh, 2.8rem);
+  overflow-anchor: none;
+  padding-block-end: clamp(.45rem, 5dvh, 2.8rem);
   font: 400 .875rem/1.8 "Montserrat", sans-serif;
+}
+.chat-log::before {
+  content: "";
+  flex: 0 0 max(.25rem, calc(50dvh - var(--chat-topbar-height) - env(safe-area-inset-top)));
 }
 .chat-turn { flex: none; display: grid; gap: 1rem; overflow-wrap: anywhere; }
 .chat-turn:first-child { margin-top: auto; }
@@ -150,10 +135,10 @@
   background: rgb(255 255 255 / 20%);
 }
 .quick-phrases button:first-child { grid-column: span 2; }
-.light-mode-row { align-items: end; }
-.light-mode-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
-.light-mode-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
+.quick-phrases-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
+.quick-phrases-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
 .light-composer button[type="submit"]:disabled { opacity: .5; }
+.light-composer button[type="submit"][data-empty="true"] { opacity: .25; }
 
 .light-screen .light-beam {
   filter: opacity(1);
@@ -225,6 +210,14 @@
   max-height: 32svh;
   overflow: auto;
   animation: reveal-voice-reply 330ms ease both;
+}
+.voice-action {
+  font-size: .875rem;
+  margin-top: .65rem;
+}
+.voice-dialogue:has(.voice-action):not([data-answered="true"]) .voice-utterance {
+  top: 0;
+  transform: translateY(calc(-100% - .55rem));
 }
 .voice-thinking {
   position: absolute;

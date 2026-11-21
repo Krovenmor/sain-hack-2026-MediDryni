@@ -106,9 +106,24 @@
   background: url("../../../assets/manual-slider-thumb.svg") center var(--thumb-offset) no-repeat;
 }
 
-.manual-dnd { display: grid; align-content: space-between; padding: .875rem .625rem .5rem; }
+.manual-dnd {
+  display: grid;
+  align-content: space-between;
+  position: relative;
+  overflow: clip;
+  padding: .875rem .625rem .5rem;
+}
+.manual-dnd-hand {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-start: 100%;
+  transition: inset-inline-start 360ms var(--ease);
+  pointer-events: none;
+}
+.manual-dnd[data-active="true"] .manual-dnd-hand { inset-inline-start: 26.4%; }
+.manual-dnd h2, .manual-dnd .manual-switch { position: relative; }
 .manual-dnd h2 { padding-top: .15rem; font-size: clamp(1.1rem, 6.3vw, 1.625rem); }
-.manual-dnd .manual-switch { justify-self: center; min-height: 2.5rem; }
+.manual-dnd .manual-switch { justify-self: start; min-height: 2.5rem; }
 .manual-climate { display: grid; grid-template-rows: auto 1fr; overflow: clip; }
 .climate-dial {
   position: relative;
@@ -120,28 +135,32 @@
   touch-action: pan-y;
   user-select: none;
 }
+.climate-dial-window {
+  position: absolute;
+  inset: auto -.625rem 0;
+  height: 7.5rem;
+  overflow: clip;
+  pointer-events: none;
+}
 .climate-dial-rotation {
   position: absolute;
-  bottom: -5.75rem;
+  top: calc(100% - 7.8125rem);
   left: 50%;
   width: 15.625rem;
   height: 15.625rem;
   transform: translateX(-50%) rotate(var(--dial-angle));
-  transform-origin: center calc(100% - .5rem);
+  mask: var(--climate-mask) center / auto no-repeat;
   transition: transform 230ms var(--ease);
-  pointer-events: none;
 }
-.climate-dial-mask {
-  transform: rotate(13.67deg);
-  mask: var(--climate-mask) 29px 33px / auto no-repeat;
-}
-.climate-dial-mask img { display: block; }
+.climate-dial-rotation img { display: block; }
 .climate-dial[data-dragging="true"], .time-wheel[data-dragging="true"] { cursor: grabbing; }
 .climate-dial[data-dragging="true"] .climate-dial-rotation,
 .time-wheel[data-dragging="true"] .time-wheel-strip { transition: none; }
 .climate-dial:focus-visible, .time-wheel:focus-visible { outline: 1px solid #fad28e; outline-offset: -3px; }
 
 .manual-alarm { padding: .4375rem .6875rem 1.8125rem; }
+.manual-alarm-options { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.manual-alarm-options:disabled { opacity: .45; }
 .alarm-time {
   position: relative;
   display: grid;
@@ -159,7 +178,6 @@
   border-block: 1px solid white;
   pointer-events: none;
 }
-.alarm-time[data-disabled="true"] { opacity: .45; }
 .time-wheel {
   position: relative;
   height: 100%;

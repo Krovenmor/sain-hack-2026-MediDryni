@@ -6,7 +6,7 @@ Pydantic models below validate AI output, not device actions or business rules.
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Generic, Literal, Protocol, TypeAlias, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
@@ -197,8 +197,18 @@ class InvalidValueSlots(DTO):
     ]
 
 
+class ClockTime(DTO):
+    at: Annotated[str, Field(pattern=r"^([01][0-9]|2[0-3]):[0-5][0-9](:[0-5][0-9])?$")]
+    on_date: date | None = None
+
+
+class Delay(DTO):
+    after_seconds: Annotated[int, Field(gt=0)]
+
+
 class InterpretationBase(DTO):
     record_id: Identifier
+    timing: Literal["now", "evening", "night", "morning", "day", "clarify"] | ClockTime | Delay = "now"
 
 
 class NumericInterpretation(InterpretationBase):

@@ -1,6 +1,7 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 
 export function useChatLineFade(log, turns, showPhrases) {
+  const lastView = useRef(null);
   useLayoutEffect(() => {
     const viewport = log.current;
     if (!viewport) return;
@@ -23,7 +24,7 @@ export function useChatLineFade(log, turns, showPhrases) {
         for (let line = first; line < end; line++) {
           const center = rect.top + (line + 0.5) * lineHeight;
           const depth = Math.max(0, Math.min(1, (center - top) / (height * 0.8)));
-          const alpha = 0.07 + 0.93 * depth;
+          const alpha = 0.2 + 0.8 * depth;
           const start = textOffset + line * lineHeight;
           stops.push(`rgb(0 0 0 / ${alpha.toFixed(3)}) ${start}px ${start + lineHeight}px`);
         }
@@ -35,15 +36,28 @@ export function useChatLineFade(log, turns, showPhrases) {
       if (!disposed && !frame) frame = requestAnimationFrame(update);
     }
 
-    viewport.scrollTop = viewport.scrollHeight;
+    const first = turns[0]?.id;
+    const tail = turns.at(-1)?.id;
+    const previous = lastView.current;
+    const sameLog = previous?.viewport === viewport;
+    const prepended = sameLog && first !== previous.first && tail === previous.tail;
+    let following = !sameLog || (!prepended && (tail !== previous.tail || previous.following));
+    if (following) viewport.scrollTop = viewport.scrollHeight;
+    else if (prepended) viewport.scrollTop = previous.top + viewport.scrollHeight - previous.height;
+    else viewport.scrollTop = previous.top;
     update();
-    let following = true;
+    function remember() {
+      lastView.current = { viewport, first, tail, following, top: viewport.scrollTop, height: viewport.scrollHeight };
+    }
+    remember();
     function onScroll() {
       following = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop < 4;
+      remember();
       schedule();
     }
     const observer = new ResizeObserver(() => {
       if (following) viewport.scrollTop = viewport.scrollHeight;
+      remember();
       schedule();
     });
     observer.observe(viewport);

@@ -232,7 +232,7 @@ class RequestRunTests(unittest.IsolatedAsyncioTestCase):
             if record_id == "request_other":
                 intent, slots = "out_of_scope", {}
             return REQUEST_INTERPRETATION_ADAPTER.validate_python({
-                "record_id": record_id, "intent": intent, "slots": slots,
+                "record_id": record_id, "intent": intent, "slots": slots, "timing": "night",
             })
 
         agent.interpret_request.side_effect = interpret

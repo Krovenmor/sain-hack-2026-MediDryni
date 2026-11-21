@@ -3,40 +3,57 @@ import orb from "../assets/orb.png";
 import menuIcon from "../assets/menu.svg";
 import manualMenuIcon from "../assets/manual-menu.svg";
 import { LightBeam } from "./components/LightBeam.jsx";
+import { useRoomChat } from "./screens/smart/useRoomChat.js";
 import { useChatReply } from "./screens/smart/useChatReply.js";
 import { LightSettings } from "./screens/smart/LightSettings.jsx";
 import { ManualSettings } from "./screens/manual/ManualSettings.jsx";
-import { updatePeriod } from "./data/staySettings.js";
+import { applySettingsChanges, periodIds, settingsPatch } from "./data/staySettings.js";
+import { useDemoClock } from "./components/DemoClock.jsx";
 import { Scenario } from "./screens/scenario/Scenario.jsx";
 import { Welcome } from "./screens/home/Welcome.jsx";
+import { useStaySettings } from "./data/useStaySettings.js";
 import { Navigation } from "./components/Navigation.jsx";
 
 export function App({ stay: initialStay }) {
-  const [stay, setStay] = useState(initialStay);
+  const { stay, acceptStay, queueChanges, notice, retry } = useStaySettings(initialStay);
+  const [periodChanges, setPeriodChanges] = useState({});
+  const [alarmChanges, setAlarmChanges] = useState({});
   const [selected, setSelected] = useState(0);
   const [screen, setScreen] = useState("home");
-  const { kelvin } = stay.periods[selected].light;
+  const roomClock = useDemoClock(initialStay.clock, screen === "home");
+  const currentPeriod = periodIds.indexOf(roomClock.clock.period);
+  const firstHomePeriod = currentPeriod > 0 ? 1 : 0;
+  const homeSelected = selected >= firstHomePeriod && selected < firstHomePeriod + 3
+    ? selected
+    : Math.max(firstHomePeriod, currentPeriod);
+  const periodId = periodIds[selected];
+  const manual = applySettingsChanges(stay, { periods: periodChanges, alarm: alarmChanges });
+  const { kelvin } = (screen === "manual" ? manual : stay).periods[selected].light;
   const lightMode = kelvin < 3100 ? "warm" : kelvin < 5250 ? "neutral" : "cold";
-  const [chatTurns, setChatTurns] = useState([]);
-  const chatReply = useChatReply(chatTurns.at(-1));
+  const chat = useRoomChat(screen === "light", acceptStay, retry);
+  const chatReply = useChatReply(chat.turns.at(-1));
   const menu = useRef(null);
   function navigate(nextScreen) {
     if (menu.current.open) menu.current.close();
     if (nextScreen === screen) return;
-    if (nextScreen === "home" && selected >= 3) setSelected(0);
+    if (screen === "manual") queueManualChanges();
+    if (screen === "home") setSelected(homeSelected);
     setScreen(nextScreen);
     window.scrollTo(0, 0);
   }
+  function selectManualPeriod(index) {
+    if (index === selected) return;
+    queueManualChanges();
+    setSelected(index);
+  }
   function changePeriod(changes) {
-    setStay(previous => updatePeriod(previous, selected, changes));
+    setPeriodChanges(previous => ({ ...previous, [periodId]: { ...previous[periodId], ...changes } }));
   }
-  function changeLight(changes) {
-    setStay(previous => updatePeriod(previous, selected, {
-      light: { ...previous.periods[selected].light, ...changes },
-    }));
-  }
-  function changeAlarm(changes) {
-    setStay(previous => ({ ...previous, wakeUp: { ...previous.wakeUp, ...changes } }));
+
+  function queueManualChanges() {
+    queueChanges(settingsPatch(stay, periodChanges, alarmChanges));
+    setPeriodChanges({});
+    setAlarmChanges({});
   }
 
   return (
@@ -54,20 +71,27 @@ export function App({ stay: initialStay }) {
           </button>
           <span className="hotel">Партнёрский отель<br />сна</span>
         </header>
+        {notice && (
+          <div className="demo-save-status">
+            <p role="status">{notice}</p>
+            <button type="button" className="pill" onClick={retry}>Повторить</button>
+          </div>
+        )}
         {screen === "light" && (
-          <LightSettings mode={lightMode} onModeChange={kelvin => changeLight({ kelvin })} stay={stay} turns={chatTurns} chatReply={chatReply}
-            onSend={turn => setChatTurns(previous => [...previous, turn])} />
+          <LightSettings chat={chat} chatReply={chatReply} />
         )}
         {screen === "scenario" && (
           <Scenario periods={stay.periods} selected={selected} onSelect={setSelected} wakeUp={stay.wakeUp} />
         )}
         {screen === "manual" && (
-          <ManualSettings periods={stay.periods} selected={selected} onSelect={setSelected}
-            wakeUp={stay.wakeUp} onPeriodChange={changePeriod} onLightChange={changeLight}
-            onAlarmChange={changeAlarm} onShowSmart={() => navigate("light")} />
+          <ManualSettings periods={manual.periods} selected={selected} onSelect={selectManualPeriod}
+            wakeUp={manual.wakeUp} tracks={stay.tracks} onPeriodChange={changePeriod} onLightChange={changePeriod}
+            onAlarmChange={changes => setAlarmChanges(previous => ({ ...previous, ...changes }))}
+            onShowSmart={() => navigate("light")} />
         )}
         {screen === "home" && (
-          <Welcome stay={stay} selected={selected} setSelected={setSelected} showPlan={() => navigate("scenario")}
+          <Welcome stay={stay} roomClock={roomClock} currentPeriod={currentPeriod} firstPeriod={firstHomePeriod}
+            selected={homeSelected} setSelected={setSelected} showPlan={() => navigate("scenario")}
             showManual={() => navigate("manual")} showSmart={() => navigate("light")} />
         )}
       </main>

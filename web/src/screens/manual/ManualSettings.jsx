@@ -1,12 +1,12 @@
 import { useRef, useState } from "react";
 import arrow from "../../../assets/manual-track-arrow.svg";
+import dndHand from "../../../assets/manual-dnd-hand.svg";
 import { ClimateDial, ManualSlider, ManualSwitch, TimeWheel } from "./ManualControls.jsx";
 import { PeriodTabs } from "../../components/PeriodTabs.jsx";
 import { formatTime, toggleLight } from "../../data/staySettings.js";
-import { tracks } from "./manualSettings.js";
 import "./manual-settings.css";
 
-function TrackPicker({ selected, onSelect, disabled }) {
+function TrackPicker({ tracks, selected, onSelect, disabled }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef(null);
   const expanded = open && !disabled;
@@ -48,10 +48,11 @@ function TrackPicker({ selected, onSelect, disabled }) {
   );
 }
 
-export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart }) {
+export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodChange, onLightChange, onAlarmChange, onShowSmart, tracks }) {
   const period = periods[selected];
   const { light } = period;
   const lit = light.brightness > 0;
+  const soundAvailable = wakeUp.enabled && wakeUp.soundOn;
   const [hour, minute] = wakeUp.time.split(":").map(Number);
 
   return (
@@ -78,7 +79,8 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
           </section>
         </div>
         <div className="manual-row manual-row-middle">
-          <section className="manual-card manual-dnd" aria-labelledby="manual-dnd-title">
+          <section className="manual-card manual-dnd" aria-labelledby="manual-dnd-title" data-active={period.doNotDisturb}>
+            <img className="manual-dnd-hand" src={dndHand} width="106" height="128" alt="" />
             <h2 id="manual-dnd-title">не<br />беспокоить</h2>
             <ManualSwitch label="Не беспокоить" checked={period.doNotDisturb} onChange={doNotDisturb => onPeriodChange({ doNotDisturb })} />
           </section>
@@ -92,27 +94,31 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
             <h2 id="manual-alarm-title">будильник</h2>
             <ManualSwitch label="Будильник" checked={wakeUp.enabled} onChange={enabled => onAlarmChange({ enabled })} />
           </div>
-          <div className="alarm-time" data-disabled={!wakeUp.enabled}>
-            <TimeWheel label="Часы" max={23} value={hour}
-              onChange={value => onAlarmChange({ time: formatTime(value, minute) })} disabled={!wakeUp.enabled} />
-            <span aria-hidden="true">:</span>
-            <TimeWheel label="Минуты" max={59} value={minute}
-              onChange={value => onAlarmChange({ time: formatTime(hour, value) })} disabled={!wakeUp.enabled} />
-          </div>
-          <div className="manual-sound-heading">
-            <h3>звук</h3>
-            <ManualSwitch label="Звук" checked={wakeUp.soundOn} onChange={soundOn => onAlarmChange({ soundOn })} />
-          </div>
-          <div className="manual-sound">
-            <div className="track-cover" aria-hidden="true" />
-            <ManualSlider label="Громкость" value={wakeUp.volume}
-              onChange={volume => onAlarmChange({ volume })} disabled={!wakeUp.soundOn} />
-          </div>
-          <TrackPicker key={selected} selected={wakeUp.track} onSelect={track => onAlarmChange({ track })} disabled={!wakeUp.soundOn} />
-          <div className="manual-card-heading manual-alarm-light">
-            <h3>сопровождение светом</h3>
-            <ManualSwitch label="Сопровождение светом" checked={wakeUp.alarmLight} onChange={alarmLight => onAlarmChange({ alarmLight })} />
-          </div>
+          <fieldset className="manual-alarm-options" disabled={!wakeUp.enabled}>
+            <legend className="visually-hidden">Настройки будильника</legend>
+            <div className="alarm-time">
+              <TimeWheel label="Часы" max={23} value={hour}
+                onChange={value => onAlarmChange({ time: formatTime(value, minute) })} disabled={!wakeUp.enabled} />
+              <span aria-hidden="true">:</span>
+              <TimeWheel label="Минуты" max={59} value={minute}
+                onChange={value => onAlarmChange({ time: formatTime(hour, value) })} disabled={!wakeUp.enabled} />
+            </div>
+            <div className="manual-sound-heading">
+              <h3>звук</h3>
+              <ManualSwitch label="Звук" checked={wakeUp.soundOn} onChange={soundOn => onAlarmChange({ soundOn })} />
+            </div>
+            <div className="manual-sound">
+              <div className="track-cover" aria-hidden="true" />
+              <ManualSlider label="Громкость" value={wakeUp.volume}
+                onChange={volume => onAlarmChange({ volume })} disabled={!wakeUp.soundOn} />
+            </div>
+            <TrackPicker tracks={tracks} key={`${selected}:${soundAvailable}`} selected={wakeUp.track}
+              onSelect={track => onAlarmChange({ track })} disabled={!soundAvailable} />
+            <div className="manual-card-heading manual-alarm-light">
+              <h3>сопровождение светом</h3>
+              <ManualSwitch label="Сопровождение светом" checked={wakeUp.alarmLight} onChange={alarmLight => onAlarmChange({ alarmLight })} />
+            </div>
+          </fieldset>
         </section>
       </div>
       <button className="pill manual-to-smart" type="button" onClick={onShowSmart}>Перейти к умной настройке</button>

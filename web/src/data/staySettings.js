@@ -1,3 +1,41 @@
+export const periodIds = ["evening", "night", "morning", "day"];
+
+function editedFields(draft, saved) {
+  return Object.fromEntries(Object.entries(draft).filter(([key, value]) => Object.hasOwn(saved, key) && value !== saved[key]));
+}
+
+export function settingsPatch(stay, periodDrafts, alarmDraft) {
+  const periods = {};
+  for (const [id, draft] of Object.entries(periodDrafts)) {
+    const period = stay.periods[periodIds.indexOf(id)];
+    const values = editedFields(draft, { ...period, kelvin: period.light.kelvin, brightness: period.light.brightness });
+    if (Object.keys(values).length) periods[id] = values;
+  }
+  return { revision: stay.revision, periods, alarm: editedFields(alarmDraft, stay.wakeUp) };
+}
+
+export function applySettingsChanges(stay, { periods, alarm }) {
+  return {
+    ...stay,
+    periods: stay.periods.map((period, index) => {
+      const changes = periods[periodIds[index]];
+      if (!changes) return period;
+      const { kelvin, brightness, previousBrightness, ...fields } = changes;
+      return {
+        ...period,
+        ...fields,
+        light: {
+          ...period.light,
+          kelvin: kelvin ?? period.light.kelvin,
+          brightness: brightness ?? period.light.brightness,
+          previousBrightness: previousBrightness ?? period.light.previousBrightness,
+        },
+      };
+    }),
+    wakeUp: { ...stay.wakeUp, ...alarm },
+  };
+}
+
 export function updatePeriod(stay, index, changes) {
   return {
     ...stay,
@@ -6,8 +44,8 @@ export function updatePeriod(stay, index, changes) {
 }
 
 export function toggleLight(light, enabled) {
-  if (enabled) return { ...light, brightness: light.previousBrightness || 30 };
-  return { ...light, previousBrightness: light.brightness, brightness: 0 };
+  if (enabled) return { brightness: light.previousBrightness || 30 };
+  return { previousBrightness: light.brightness, brightness: 0 };
 }
 
 export function formatTime(hour, minute) {

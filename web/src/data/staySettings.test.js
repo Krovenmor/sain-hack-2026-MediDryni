@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { demoStay } from "./demoStay.js";
-import { alarmMode, periodSummary, toggleLight, updatePeriod } from "./staySettings.js";
-import { composeDemoTurn } from "../screens/smart/chat.js";
+import { alarmMode, periodSummary, settingsPatch, toggleLight, updatePeriod } from "./staySettings.js";
 
-test("changing a period updates its card and future replies, preserving the other periods", () => {
+test("PATCH omits untouched fields, restored values and the local brightness cache", () => {
+  const stay = { ...demoStay, revision: 2 };
+  const draft = {
+    evening: toggleLight(stay.periods[0].light, false),
+    night: { temperature: stay.periods[1].temperature },
+  };
+  assert.deepEqual(settingsPatch(stay, draft, { time: stay.wakeUp.time, volume: 45 }), {
+    revision: 2, periods: { evening: { brightness: 0 } }, alarm: { volume: 45 },
+  });
+});
+
+test("changing a period updates its card, preserving the other periods", () => {
   const night = updatePeriod(demoStay, 1, { temperature: 18, doNotDisturb: false, curtains: 15 });
   assert.deepEqual(periodSummary(night.periods[1], night.wakeUp),
     ["Свет: выключен", "Температура: 18 °C", "Шторы: 15 %", "Не беспокоить: выкл."]);
-  assert.match(composeDemoTurn("Я ложусь", night).reply, /18 °C/);
-  assert.doesNotMatch(composeDemoTurn("Не беспокоить", night).reply, /Ночь/);
   assert.equal(night.periods[0], demoStay.periods[0]);
   assert.equal(demoStay.periods[1].temperature, 19);
 });

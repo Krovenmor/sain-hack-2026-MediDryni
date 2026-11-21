@@ -21,6 +21,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Собрать клиент показа
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Настроить SSH
         env:
           STAND_SSH_KEY: ${{ secrets.STAND_SSH_KEY }}
@@ -49,7 +58,9 @@ jobs:
           STAND_HOST: ${{ secrets.STAND_HOST || 'hack.be-healthy.tech' }}
         run: |
           # git archive исключает документацию по правилам export-ignore в .gitattributes.
-          git archive --format=tar.gz HEAD | ssh -i ~/.ssh/stand_key \
+          git archive --format=tar --output="$RUNNER_TEMP/deploy.tar" HEAD
+          tar -rf "$RUNNER_TEMP/deploy.tar" web/dist
+          gzip -c "$RUNNER_TEMP/deploy.tar" | ssh -i ~/.ssh/stand_key \
             -o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes \
             -o ServerAliveInterval=30 \
             "deploy@$STAND_HOST" "deploy $GITHUB_SHA"
