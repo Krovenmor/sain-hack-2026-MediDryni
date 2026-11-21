@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
+import { createVoiceActivity } from "./voiceActivity.js";
 
-export function useMicrophoneLevel(enabled, orb) {
+export function useMicrophoneLevel(enabled, orb, onSilence) {
   const [error, setError] = useState("");
   const stop = useRef(null);
+  const finishAfterSilence = useEffectEvent(onSilence);
 
   useEffect(() => {
     setError("");
@@ -24,6 +26,7 @@ export function useMicrophoneLevel(enabled, orb) {
     let context;
     let recorder;
     let frame;
+    const activity = createVoiceActivity();
 
     function release() {
       cancelAnimationFrame(frame);
@@ -57,7 +60,8 @@ export function useMicrophoneLevel(enabled, orb) {
         const recording = new Promise(resolve => {
           recorder.addEventListener("dataavailable", event => chunks.push(event.data));
           recorder.addEventListener("stop", () => {
-            resolve(disposed ? null : new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" }));
+            resolve(disposed || !activity.heardSpeech ? null
+              : new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "" }));
           }, { once: true });
           recorder.addEventListener("error", () => {
             resolve(null);
@@ -83,15 +87,19 @@ export function useMicrophoneLevel(enabled, orb) {
 
         const samples = new Float32Array(analyser.fftSize);
         let level = 0;
-        function update() {
+        function update(now) {
           analyser.getFloatTimeDomainData(samples);
           const rms = Math.sqrt(samples.reduce((sum, sample) => sum + sample * sample, 0) / samples.length);
           const target = Math.min(1, Math.max(0, (rms - 0.012) / 0.14));
           level += (target - level) * (target > level ? 0.3 : 0.12);
           if (!reducedMotion.matches) image.style.setProperty("--voice-scale", (1 + level * 0.19).toFixed(3));
+          if (activity.update(rms, now)) {
+            finishAfterSilence(stop.current?.());
+            return;
+          }
           frame = requestAnimationFrame(update);
         }
-        update();
+        frame = requestAnimationFrame(update);
       } catch (cause) {
         if (disposed) return;
         release();

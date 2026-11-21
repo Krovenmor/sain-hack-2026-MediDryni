@@ -1,6 +1,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { recordingUpload, turnsFromMessages } from "./chat.js";
+import { createVoiceActivity } from "./voiceActivity.js";
+
+test("silence and a short noise spike never trigger a voice upload", () => {
+  const activity = createVoiceActivity();
+  assert.equal(activity.update(0, 0), false);
+  assert.equal(activity.update(0.2, 4000), false);
+  assert.equal(activity.update(0, 4030), false);
+  assert.equal(activity.update(0, 10000), false);
+  assert.equal(activity.heardSpeech, false);
+});
+
+test("voice auto-send waits for three seconds after the last speech", () => {
+  const activity = createVoiceActivity();
+  activity.update(0.1, 0);
+  activity.update(0.1, 100);
+  assert.equal(activity.heardSpeech, true);
+  assert.equal(activity.update(0, 3000), false);
+  activity.update(0.1, 3050);
+  assert.equal(activity.update(0.1, 3150), false);
+  assert.equal(activity.update(0, 6149), false);
+  assert.equal(activity.update(0, 6150), true);
+});
 
 test("history keeps turns in server order", () => {
   const turn = (id, text, reply) => [

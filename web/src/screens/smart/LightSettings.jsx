@@ -48,7 +48,7 @@ export function LightSettings({ chat, chatReply }) {
   const log = useRef(null);
   const orb = useRef(null);
   useChatLineFade(log, turns, showPhrases);
-  const { error: microphoneError, stopRecording } = useMicrophoneLevel(voiceOpen && !voiceTurn, orb);
+  const { error: microphoneError, stopRecording } = useMicrophoneLevel(voiceOpen && !voiceTurn, orb, finishRecording);
   const inputBusy = busy || finishingRecording;
   const voiceStatus = microphoneError || recordingStatus || (voiceTurn?.failed ? error : "") || speech.status;
 
@@ -66,7 +66,7 @@ export function LightSettings({ chat, chatReply }) {
     setVoiceOpen(false);
   }
 
-  async function toggleVoice() {
+  function toggleVoice() {
     if (inputBusy) return;
     setRecordingStatus("");
     if (!voiceOpen || voiceTurn) {
@@ -75,7 +75,10 @@ export function LightSettings({ chat, chatReply }) {
       return;
     }
 
-    const recording = stopRecording();
+    void finishRecording(stopRecording());
+  }
+
+  async function finishRecording(recording) {
     if (!recording) {
       setRecordingStatus("Запись ещё недоступна");
       return;
@@ -87,7 +90,12 @@ export function LightSettings({ chat, chatReply }) {
     try {
       const audio = await recording;
       if (controller.signal.aborted) return;
-      const body = recordingUpload(audio ?? new Blob());
+      if (!audio) {
+        setRecordingStatus("Речь не распознана. Попробуйте записать ещё раз.");
+        setVoiceOpen(false);
+        return;
+      }
+      const body = recordingUpload(audio);
       const result = await demoRequest("/voice/recordings", "POST", body, { signal: controller.signal });
       if (controller.signal.aborted) return;
       const id = newMessageId();
