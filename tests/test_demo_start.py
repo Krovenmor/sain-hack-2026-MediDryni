@@ -194,6 +194,25 @@ class DemoStartTests(DemoFixture):
         self.assertEqual((await self.start(100, access_code="wrong")).status_code, 429)
         self.assertEqual(self.calls, [])
 
+    async def test_default_dataset_is_public_to_read_and_team_only_to_change(self):
+        path = "/api/v1/demo/default-dataset"
+        team = {"Authorization": "Bearer team-token"}
+        suggested = {"dataset_code": "pending-final-code"}
+        self.assertEqual((await self.api.get(path)).json(), {"dataset_code": None})
+        for headers in ({}, {"Authorization": "Basic team-token"}, {"Authorization": f"Bearer {1:064x}"}):
+            self.assertEqual((await self.api.put(path, headers=headers, json=suggested)).status_code, 401)
+        self.assertEqual((await self.api.put(path, headers=team, json={"dataset_code": ""})).status_code, 422)
+        self.assertEqual((await self.api.put(path, headers=team, json=suggested)).status_code, 204)
+        response = await self.api.get(path)
+        self.assertEqual(response.json(), suggested)
+        self.assertEqual(response.headers["cache-control"], "private, no-store")
+        self.assertFalse(response.cookies)
+        self.assertEqual((await self.api.put(path, headers=team, json={"dataset_code": "final-code"})).status_code, 204)
+        self.assertEqual((await self.api.get(path)).json(), {"dataset_code": "final-code"})
+        self.assertEqual((await self.api.get("/demo/room.js")).status_code, 403)
+        self.assertEqual(self.calls, [])
+        self.assertEqual((await self.start(access_code="show-code")).status_code, 200)
+
     async def test_single_stay_autostart_and_retry_failed_publication(self):
         self.fail_publish = True
         self.assertEqual((await self.start(access_code="show-code")).status_code, 502)

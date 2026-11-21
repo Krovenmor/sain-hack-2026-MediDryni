@@ -2,9 +2,18 @@ const form = document.querySelector("#entry");
 const access = document.querySelector("#access");
 const dataset = document.querySelector("#dataset");
 const choose = document.querySelector("#choose");
-const select = document.querySelector("#stay");
+const stayOptions = document.querySelector("#stay-options");
 const status = document.querySelector("#status");
+const loading = document.querySelector("#loading");
 const submit = form.querySelector("button");
+
+const loadingPhrases = [
+  "ЛЛМ думает…",
+  "ЛЛМ очень старается…",
+  "Готовим персональный сценарий…",
+  "Уже скоро…",
+  "Подготовка ещё идёт…",
+];
 
 function browserKey() {
   let key = localStorage.getItem("demo.client");
@@ -39,8 +48,16 @@ const errors = {
 
 async function start(stayId) {
   submit.disabled = true;
+  access.readOnly = true;
   dataset.readOnly = true;
+  choose.disabled = true;
+  loading.hidden = false;
   status.textContent = "Открываем заезд…";
+  let phrase = 0;
+  const loadingTimer = window.setInterval(() => {
+    status.textContent = loadingPhrases[phrase++];
+    if (phrase === loadingPhrases.length) window.clearInterval(loadingTimer);
+  }, 7000);
   try {
     const code = dataset.value.trim();
     let key = navigator.locks
@@ -77,8 +94,16 @@ async function start(stayId) {
     access.value = "";
     askCode(false);
     if (result.status === "choose_stay") {
-      select.replaceChildren(...result.stays.map(stay =>
-        new Option(`${stay.user_id} · ${stay.check_in_at.replace("T", " ")}`, stay.stay_record_id)));
+      stayOptions.replaceChildren(...result.stays.map((stay, index) => {
+        const label = document.createElement("label");
+        const option = document.createElement("input");
+        option.type = "radio";
+        option.name = "stay";
+        option.value = stay.stay_record_id;
+        option.checked = index === 0;
+        label.append(option, `${stay.user_id} · ${stay.check_in_at.replace("T", " ")}`);
+        return label;
+      }));
       choose.hidden = false;
       status.textContent = "";
       return;
@@ -89,16 +114,35 @@ async function start(stayId) {
   } catch {
     status.textContent = "Не удалось загрузить приложение. Попробуйте ещё раз.";
   } finally {
+    window.clearInterval(loadingTimer);
+    loading.hidden = true;
     submit.disabled = false;
+    access.readOnly = false;
     dataset.readOnly = false;
+    choose.disabled = false;
   }
 }
 
 form.addEventListener("submit", event => {
   event.preventDefault();
-  if (!submit.disabled) void start(choose.hidden ? undefined : select.value);
+  if (!submit.disabled) void start(choose.hidden ? undefined : stayOptions.querySelector(":checked")?.value);
 });
-dataset.addEventListener("input", () => { choose.hidden = true; });
+let datasetEdited = false;
+dataset.addEventListener("input", () => {
+  datasetEdited = true;
+  choose.hidden = true;
+});
+
+async function prefillDataset() {
+  try {
+    const response = await fetch("/api/v1/demo/default-dataset", { cache: "no-store" });
+    if (!response.ok) return;
+    const { dataset_code } = await response.json();
+    if (dataset_code && !datasetEdited && !dataset.value && !submit.disabled) dataset.value = dataset_code;
+  } catch {
+    // Manual entry is available if the default cannot be fetched.
+  }
+}
 
 try {
   const saved = JSON.parse(localStorage.getItem("demo.selection"));
@@ -106,6 +150,8 @@ try {
     dataset.value = saved.code;
     askCode(false);
     void start(saved.id);
+  } else {
+    void prefillDataset();
   }
 } catch {
   status.textContent = "Для входа нужен доступ к хранилищу браузера.";

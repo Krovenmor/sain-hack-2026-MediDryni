@@ -3,26 +3,101 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-  <title>Вход</title>
+  <title>Вход в демонстрацию</title>
   <style id="entry-style">
-    body { margin: 0; font: 1rem/1.5 system-ui, sans-serif; color: #202020; }
-    main { margin: 12vh auto; max-width: 22rem; padding: 1.5rem; }
-    label, input, select, button { display: block; width: 100%; box-sizing: border-box; }
-    input, select, button { padding: .65rem; margin: .25rem 0 1rem; font: inherit; }
+    html { background: #20020b; color-scheme: dark; }
+    body {
+      margin: 0;
+      color: #fff5f6;
+      font: 1rem/1.5 system-ui, sans-serif;
+      background: radial-gradient(ellipse at 85% 0%, #582333, transparent 65%);
+    }
+    #root {
+      display: grid;
+      align-items: center;
+      min-height: 100dvh;
+      box-sizing: border-box;
+      padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right))
+        max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    }
+    .entry-panel {
+      width: min(100%, 26rem);
+      box-sizing: border-box;
+      margin-inline: auto;
+      padding: clamp(1.25rem, 6vw, 2rem);
+      border: 1px solid #865d67;
+      border-radius: 1.5rem;
+      background: #2d101a;
+    }
+    h1 { margin: 0; font-size: clamp(1.6rem, 6vw, 2rem); font-weight: 500; line-height: 1.2; }
+    .entry-note { margin: .55rem 0 1.5rem; color: #e1c3cd; }
+    label { display: block; margin-bottom: .9rem; font-size: .875rem; }
+    input:not([type="radio"]), button {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      min-height: 2.75rem;
+      border-radius: .8rem;
+      padding: .55rem .75rem;
+      font: inherit;
+      font-size: 1rem;
+    }
+    input:not([type="radio"]) { margin-top: .25rem; border: 1px solid #865d67; background: #20020b; color: inherit; }
+    button { margin-top: 1.15rem; border: 0; border-radius: 2rem; background: #fff5f6; color: #20020b; cursor: pointer; }
+    button:disabled { opacity: .65; cursor: wait; }
+    :is(input, button):focus-visible { outline: 2px solid #ffd08b; outline-offset: 3px; }
+    .stay-choice { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+    .stay-choice legend { padding: 0 0 .35rem; font-size: .875rem; }
+    .stay-options { display: grid; gap: .4rem; max-height: min(40dvh, 15rem); overflow: auto; padding: .15rem; }
+    .stay-options label {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      margin: 0;
+      padding: .6rem .65rem;
+      border: 1px solid #865d67;
+      border-radius: .8rem;
+      overflow-wrap: anywhere;
+      cursor: pointer;
+    }
+    .stay-options input { flex: none; margin: 0; accent-color: #ffd08b; }
+    .stay-options label:has(input:checked) { border-color: #ffd08b; background: #482430; }
+    .stay-choice:disabled { opacity: .65; }
+    .entry-feedback { display: flex; align-items: center; min-height: 2.5em; gap: .75rem; margin-top: .85rem; }
+    #status { margin: 0; color: #eed6de; font-size: .9rem; }
+    .entry-spinner {
+      width: 1.45rem;
+      height: 1.45rem;
+      flex: 0 0 auto;
+      border-radius: 50%;
+      border: 2px solid #865d67;
+      border-top-color: #fff5f6;
+      border-right-color: #ffd08b;
+      animation: entry-spin .9s linear infinite;
+    }
+    @keyframes entry-spin { to { transform: rotate(1turn); } }
+    @media (prefers-reduced-motion: reduce) { .entry-spinner { animation: none; } }
     [hidden] { display: none; }
   </style>
 </head>
 <body>
   <div id="root">
-    <main>
-      <h1>Вход</h1>
+    <main class="entry-panel">
+      <h1>Вход в демонстрацию</h1>
+      <p class="entry-note">Этот экран нужен только для доступа и не входит в демонстрацию.</p>
       <form id="entry">
         <label id="access-label">Код показа<input type="text" id="access" required maxlength="256" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
         <label>Код набора<input id="dataset" required maxlength="128" autocapitalize="none" spellcheck="false"></label>
-        <label id="choose" hidden>Заезд<select id="stay"></select></label>
-        <button>Продолжить</button>
+        <fieldset class="stay-choice" id="choose" hidden>
+          <legend>Заезд</legend>
+          <div class="stay-options" id="stay-options"></div>
+        </fieldset>
+        <button type="submit">Продолжить</button>
       </form>
-      <p role="status" id="status"></p>
+      <div class="entry-feedback">
+        <span class="entry-spinner" id="loading" aria-hidden="true" hidden></span>
+        <p role="status" id="status"></p>
+      </div>
     </main>
   </div>
   <script type="module" src="/login.js"></script>
