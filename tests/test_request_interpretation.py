@@ -84,13 +84,14 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 "conversation": [old.model_dump(exclude_none=True)],
             })
             return completion(json.dumps({
-                "record_id": "request_1", "intent": "warmer",
+                "record_id": "request_1", "intent": "warmer", "timing": "night",
                 "slots": {"mode": "relative", "amount": None},
             }))
 
         result = await self.make_agent(handle).interpret_request(item, timeout_s=1)
         self.assertEqual(len(calls), 1)
         self.assertEqual(result.intent, "warmer")
+        self.assertEqual(result.timing, "night")
         self.assertIsNone(result.slots.amount)
 
     async def test_preserves_valid_slots_and_special_intents(self):
@@ -144,6 +145,16 @@ class RequestInterpretationTests(unittest.IsolatedAsyncioTestCase):
                 agent = self.make_agent(lambda request: completion(output))
                 with self.assertRaisesRegex(AiAgentError, "^invalid_response$"):
                     await agent.interpret_request(request_context("Теплее"), timeout_s=1)
+
+    async def test_missing_or_unknown_demo_timing_is_not_a_live_command(self):
+        item = request_context("Сделай теплее, когда лягу")
+        item = replace(item, request=item.request | {"periods": {"night": {"start": AT}}})
+        for fields in ({}, {"timing": "tomorrow"}):
+            output = {"record_id": "request_1", "intent": "warmer",
+                      "slots": {"mode": "relative", "amount": 1}, **fields}
+            agent = self.make_agent(lambda request: completion(json.dumps(output)))
+            with self.assertRaisesRegex(AiAgentError, "invalid_response"):
+                await agent.interpret_request(item, timeout_s=1)
 
     async def test_retry_and_dialogue_reference(self):
         item = replace(

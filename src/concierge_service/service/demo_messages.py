@@ -1,28 +1,10 @@
-"""Chat history and explicit time-of-day requests in the interactive demo."""
+"""Chat history in the interactive demo."""
 
-import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from concierge_service.ports.ai import DialogueMessage
 from concierge_service.ports.hack_api import HackApiError
-
-
-PERIOD_NAMES = {
-    "утром": "morning", "на утро": "morning", "к утру": "morning",
-    "днём": "day", "днем": "day",
-    "вечером": "evening", "на вечер": "evening", "к вечеру": "evening",
-    "ночью": "night", "на ночь": "night", "к ночи": "night",
-}
-_TIME_OF_DAY = re.compile(r"\b(?:" + "|".join(PERIOD_NAMES) + r")\b")
-_ALARM_OR_HISTORY = re.compile(r"будильник|\bразбуд\w*|как вчера|как тогда|\bвчера\b", re.IGNORECASE)
-
-
-def requested_period(text: str) -> str | None:
-    if _ALARM_OR_HISTORY.search(text):
-        return None
-    matches = {PERIOD_NAMES[word] for word in _TIME_OF_DAY.findall(" ".join(text.lower().split()))}
-    return next(iter(matches)) if len(matches) == 1 else None
 
 
 @dataclass

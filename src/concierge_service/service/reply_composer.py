@@ -7,7 +7,7 @@ from concierge_service.domain.answers import ReplyAnswer
 from concierge_service.domain.dataset import Request
 
 RequestOutcome = ActionRejection | Literal[
-    "applied", "unchanged", "unrecognized", "room_error", "partial",
+    "applied", "unchanged", "unrecognized", "room_error", "partial", "clarify_time", "past_period",
     "medical", "out_of_scope", "out_of_range", "unknown_track", "unsupported_mode", "invalid_time",
 ]
 
@@ -30,6 +30,8 @@ _SUCCESS = {
     "like_yesterday": "Применил сохранённые настройки за указанный день.",
 }
 _OUTCOME_TEXT = {
+    "clarify_time": "Когда изменить настройку: сейчас, вечером, ночью, утром или днём?",
+    "past_period": "Этот период уже прошёл. Уточните, когда изменить настройку.",
     "unchanged": "Нужная настройка уже установлена.",
     "unrecognized": "Не удалось понять, какую настройку номера нужно изменить.",
     "unsupported": "Пока не могу выполнить такую просьбу.",

@@ -8,7 +8,6 @@ from uuid import UUID
 
 from concierge_service.domain.action_planner import (
     ActionPlanError,
-    DevicePatch,
     patch_matches_state,
 )
 from concierge_service.domain.answers import RequestAnswer
@@ -86,9 +85,8 @@ class RequestHandler:
         return RequestAnswer(request.record_id, str(session.session_id), replies, applied)
 
     async def handle_interactive(
-        self, request: Request, context: RequestContext, catalog: DeviceFields,
-        preferences: ResolvedPreferences,
-        execute: Callable[[tuple[DevicePatch, ...]], Awaitable[tuple[RequestOutcome, dict]]],
+        self, request: Request, context: RequestContext,
+        execute: Callable[[RequestInterpretation], Awaitable[tuple[RequestOutcome, dict]]],
     ) -> tuple[RequestOutcome, str, dict]:
         intent = None
         applied = {}
@@ -100,9 +98,10 @@ class RequestHandler:
                 outcome = intent
             elif isinstance(interpreted, InvalidValueInterpretation):
                 outcome = interpreted.slots.reason
+            elif interpreted.timing == "clarify":
+                outcome = "clarify_time"
             else:
-                patches = plan_request(request, interpreted, context, preferences, catalog)
-                outcome, applied = await execute(patches) if patches else ("unchanged", {})
+                outcome, applied = await execute(interpreted)
         except AiAgentError as exc:
             outcome = "missing_history" if exc.code == "unresolved_reference" else "unrecognized"
         except TimeoutError:

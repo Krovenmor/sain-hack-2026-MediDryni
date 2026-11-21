@@ -199,6 +199,7 @@ class InvalidValueSlots(DTO):
 
 class InterpretationBase(DTO):
     record_id: Identifier
+    timing: Literal["now", "evening", "night", "morning", "day", "clarify"] = "now"
 
 
 class NumericInterpretation(InterpretationBase):

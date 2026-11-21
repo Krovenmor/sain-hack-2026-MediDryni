@@ -445,7 +445,8 @@ class DemoStartTests(DemoFixture):
         await self.room_request("PATCH", "/demo/clock", json={"at": at.isoformat(), "paused": True})
         interpreter = AsyncMock(side_effect=[
             NumericInterpretation(record_id="one", intent="cooler", slots=RelativeAmount(mode="relative", amount=1)),
-            NumericInterpretation(record_id="two", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=19)),
+            NumericInterpretation(record_id="two", intent="warmer", timing="night",
+                                  slots=RelativeAmount(mode="relative", amount=1.5)),
         ])
         self.service.ai.interpret_request = interpreter
         first = {"client_message_id": "one", "text": "сделай на градус прохладнее"}
@@ -460,11 +461,13 @@ class DemoStartTests(DemoFixture):
         self.assertEqual(view["revision"], 1)
 
         second = await self.room_request("POST", "/messages", json={
-            "client_message_id": "two", "text": "поставь на ночь 19 градусов",
+            "client_message_id": "two", "text": "когда лягу, сделай на полтора градуса теплее",
         })
         self.assertEqual(second.status_code, 200, second.text)
         self.assertEqual(second.json()["reply"]["text"], "Обновил настройки на ночь.")
-        self.assertEqual(interpreter.await_args.args[0].request["at"], night.isoformat())
+        self.assertEqual(interpreter.await_args.args[0].request["at"], at.isoformat())
+        self.assertEqual(interpreter.await_args.args[0].request["periods"]["night"]["start"], night.isoformat())
+        self.assertEqual(interpreter.await_count, 2)
         self.assertEqual(len(interpreter.await_args.args[0].conversation), 2)
         self.assertEqual(self.calls.count(f"/room/{client.room.session_id}/action"), 1)
         self.assertEqual(len(self.scenarios), 3)
@@ -482,11 +485,38 @@ class DemoStartTests(DemoFixture):
         conflict = await self.room_request("POST", "/messages", json=first | {"text": "другой текст"})
         self.assertEqual(conflict.status_code, 409)
 
+    async def test_clarification_and_period_reference_do_not_trigger_early_action(self):
+        await self.start(access_code="show-code")
+        client = self.service.clients[f"{1:064x}"]
+        interpreter = AsyncMock(side_effect=[
+            NumericInterpretation(record_id=key, intent="dimmer", timing=timing,
+                                  slots=AbsoluteAmount(mode="absolute", value=value))
+            for key, timing, value in (("ask", "clarify", 35), ("when", "night", 35), ("copy", "now", 35))
+        ])
+        self.service.ai.interpret_request = interpreter
+        async def send(key, text):
+            response = await self.room_request("POST", "/messages", json={"client_message_id": key, "text": text})
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        answer = await send("ask", "Выставь яркость 35%, только попозже")
+        self.assertIn("Когда", answer["reply"]["text"])
+        self.assertEqual(answer["revision"], 0)
+        self.assertEqual(self.room_actions, {})
+        self.assertEqual(len(self.scenarios), 1)
+        self.assertEqual((await send("when", "Когда лягу"))["revision"], 1)
+        self.assertEqual(interpreter.await_args.args[0].conversation[-2].text, answer["guest"]["text"])
+        self.assertEqual(self.room_actions, {})
+        self.assertEqual((await send("copy", "Сейчас сделай свет как ночью"))["revision"], 2)
+        calls = self.room_actions[str(client.room.session_id)]
+        self.assertEqual([call["values"] for call in calls], [{"brightness": 35}])
+        self.assertEqual(interpreter.await_count, 3)
+
     async def test_unconfirmed_future_chat_does_not_change_plan(self):
         await self.start(access_code="show-code")
         self.fail_publish = True
         self.service.ai.interpret_request = AsyncMock(return_value=NumericInterpretation(
-            record_id="fail", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=19),
+            record_id="fail", intent="warmer", timing="night", slots=AbsoluteAmount(mode="absolute", value=19),
         ))
         response = await self.room_request("POST", "/messages", json={
             "client_message_id": "fail", "text": "ночью поставь 19 градусов",
@@ -501,7 +531,7 @@ class DemoStartTests(DemoFixture):
         client = self.service.clients[f"{1:064x}"]
         _, night, morning, _ = client.plan.boundaries
         self.service.ai.interpret_request = AsyncMock(return_value=NumericInterpretation(
-            record_id="dawn", intent="warmer", slots=AbsoluteAmount(mode="absolute", value=22),
+            record_id="dawn", intent="warmer", timing="morning", slots=AbsoluteAmount(mode="absolute", value=22),
         ))
         reply = await self.room_request("POST", "/messages", json={
             "client_message_id": "dawn", "text": "К утру сделай 22 градуса",

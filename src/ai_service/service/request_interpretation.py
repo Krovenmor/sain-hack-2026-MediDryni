@@ -177,6 +177,8 @@ def validate_interpretation(
             raise AiAgentError("unresolved_reference") from None
         raise InvalidModelOutput(validation_reason(invalid, "interpretation_schema")) from None
 
+    if "periods" in item.request and "timing" not in result.model_fields_set:
+        raise InvalidModelOutput("interpretation_missing_timing")
     if result.record_id != item.request["record_id"]:
         raise InvalidModelOutput("interpretation_record_id")
     if result.intent == "sound_on" and result.slots.track_id is not None:

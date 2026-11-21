@@ -15,12 +15,13 @@ from concierge_service.ports.dataset import ParsedDataset
 from concierge_service.ports.hack_api import DemoHackApi, DemoRun, HackApiError
 from concierge_service.ports.room import RoomApi, RoomApiError, RoomSession
 from concierge_service.ports.voice import VoiceApi, VoiceError
-from concierge_service.service.demo_messages import DemoMessages, requested_period
+from concierge_service.service.demo_messages import DemoMessages
 from concierge_service.service.demo_settings import (
     PERIODS, DemoClock, alarm_steps, combine_period_changes, merge_steps, period_devices, update_periods,
 )
 from concierge_service.service.preference_resolver import resolve_preferences
 from concierge_service.service.request_handler import RequestHandler
+from concierge_service.service.request_planning import plan_request
 
 
 @dataclass
@@ -329,28 +330,46 @@ class DemoService:
                 return cached
 
             plan = client.plan
-            period = requested_period(text)
             current = client.clock.period_index(received_at)
-            selected = PERIODS.index(period) if period else current
-            at = plan.boundaries[selected] if selected > current else received_at
-            state = (await self.room_state(client, at))["state"]
+            state = (await self.room_state(client, received_at))["state"]
             parsed, index = self.datasets[client.dataset_code]
             stay = plan.stay
             source = parsed.source
-            record = Request(message_id, stay.user_id, stay.record_id, at, state, (Utterance(received_at, text),))
+            record = Request(message_id, stay.user_id, stay.record_id, received_at, state, (Utterance(received_at, text),))
+            steps = client.personal_steps if client.personal_steps is not None else plan.steps
+            periods = {
+                name: {"start": start.isoformat(), "state": planned_state(steps, index, start)}
+                for name, start in zip(PERIODS, plan.boundaries, strict=True)
+            }
             context = RequestContext(
                 profile=self.profile(parsed, index, stay.user_id),
                 request={"record_id": message_id, "user_id": stay.user_id, "stay_id": stay.record_id,
-                         "at": at.isoformat(), "initial_state": state,
+                         "at": received_at.isoformat(), "initial_state": state,
+                         "current_period": PERIODS[current], "periods": periods,
                          "utterances": [{"role": "user", "at": received_at.isoformat(), "text": text}]},
                 stay=source.stays_by_id[stay.record_id], intents=source.intents,
                 conversation=client.messages.context(), preference_hints=self.hints[client.dataset_code, stay.user_id],
             )
 
-            async def execute(patches):
+            scheduled_period = None
+
+            async def execute(interpreted):
+                nonlocal scheduled_period
+                period = interpreted.timing
+                selected = current if period == "now" else PERIODS.index(period)
                 self.check_expiry(key)
                 if selected < current:
-                    raise ActionPlanError("invalid_value")
+                    return "past_period", {}
+                target = record
+                if selected > current:
+                    at = plan.boundaries[selected]
+                    snapshot = await self.room_state(client, at)
+                    target = replace(record, at=at, initial_state=snapshot["state"])
+                patches = plan_request(target, interpreted, context, self.preferences[client.dataset_code, stay.user_id],
+                                       index.device_fields_by_device)
+                if not patches:
+                    return "unchanged", {}
+                self.check_expiry(key)
                 for patch in patches:
                     alarm_at = patch.values.get("at") if patch.device_id == "alarm" else None
                     if alarm_at and datetime.fromisoformat(alarm_at).timestamp() > client.clock.end.timestamp():
@@ -366,17 +385,13 @@ class DemoService:
                         if exc.code == "empty_period":
                             raise ActionPlanError("invalid_value") from exc
                         raise
+                    scheduled_period = period
                     return "applied", applied
-                return await self.apply_live(client, at, patches)
+                return await self.apply_live(client, received_at, patches)
 
-            outcome, reply, applied = await self.request_handler.handle_interactive(
-                record, context, index.device_fields_by_device,
-                self.preferences[client.dataset_code, stay.user_id], execute,
-            )
-            if selected < current and outcome == "invalid_value":
-                reply = "Этот период уже прошёл. Уточните, когда изменить настройку."
-            elif selected > current and outcome == "applied":
-                label = {"evening": "вечер", "night": "ночь", "morning": "утро", "day": "день"}[period]
+            _, reply, applied = await self.request_handler.handle_interactive(record, context, execute)
+            if scheduled_period:
+                label = {"evening": "вечер", "night": "ночь", "morning": "утро", "day": "день"}[scheduled_period]
                 reply = f"Обновил настройки на {label}."
             return client.messages.append(message_id, text, reply, received_at, applied, client.revision)
 
@@ -516,14 +531,19 @@ def shifted_steps(plan: DemoPlan, room: RoomSession) -> list[ScenarioStep]:
     return steps
 
 
-def stay_view(stay: Stay, steps: tuple[ScenarioStep, ...], index: DatasetIndex, samples: tuple[datetime, ...]) -> dict:
+def planned_state(steps: tuple[ScenarioStep, ...], index: DatasetIndex, at: datetime) -> dict:
     state = {device: {field: f.default_value for field, f in fields.items()}
              for device, fields in index.device_fields_by_device.items()}
+    for step in steps:
+        if step.at.timestamp() <= at.timestamp():
+            state[step.device_id].update(step.values)
+    return state
+
+
+def stay_view(stay: Stay, steps: tuple[ScenarioStep, ...], index: DatasetIndex, samples: tuple[datetime, ...]) -> dict:
     periods = []
     for name, at in zip(("Вечер", "Ночь", "Утро", "День"), samples, strict=True):
-        for step in steps:
-            if step.at.timestamp() <= at.timestamp():
-                state[step.device_id].update(step.values)
+        state = planned_state(steps, index, at)
         periods.append({
             "name": name, "light": {"kelvin": state["light"]["color_temperature_k"],
                                      "brightness": state["light"]["brightness"]},
