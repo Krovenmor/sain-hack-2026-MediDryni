@@ -1,0 +1,255 @@
+.welcome.light-screen {
+  height: 100dvh;
+  overflow: clip;
+  display: flex;
+  flex-direction: column;
+}
+.light-settings { display: flex; flex: 1; align-items: end; }
+.light-title {
+  position: absolute;
+  top: clamp(5.5rem, 38.7dvh, 22.2rem);
+  left: 0;
+  width: 100%;
+  text-align: center;
+  font: 400 clamp(1.85rem, 9.7vw, 2.5rem)/1.46 "Train One", sans-serif;
+  letter-spacing: -.2em;
+  padding-right: .2em;
+  text-shadow: 0 0 5px white;
+}
+.light-controls { width: 100%; }
+.light-mode-row { display: flex; justify-content: flex-end; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+.light-mode-row[hidden] { display: none; }
+.light-modes:not([hidden]) { display: flex; gap: .25rem; }
+.light-modes { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.light-modes label { position: relative; cursor: pointer; }
+.light-modes label span {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  min-height: 2.5rem;
+  padding: .25rem clamp(.3rem, 1.15vw, .5rem);
+  border: 1px solid rgb(255 255 255 / 40%);
+  background: rgb(32 2 11 / 75%);
+  border-radius: .65rem;
+  font: 400 clamp(.65rem, 3vw, .79rem)/1.15 "Montserrat", sans-serif;
+}
+.light-modes label span::before {
+  content: "";
+  width: .45rem;
+  height: .45rem;
+  flex: 0 0 auto;
+  background: var(--swatch);
+  border-radius: 50%;
+}
+.light-modes input:checked + span { border-color: var(--swatch); background: rgb(255 255 255 / 16%); }
+.light-modes input:focus-visible + span { outline: 2px solid var(--swatch); outline-offset: 2px; }
+.light-mode-toggle {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 auto;
+  display: grid;
+  align-content: space-around;
+  padding: .25rem;
+  border: 1px solid white;
+  border-radius: .625rem;
+}
+.light-mode-toggle span {
+  height: .625rem;
+  border: 1px solid white;
+  border-radius: 1rem;
+  background: rgb(255 255 255 / 20%);
+}
+.light-composer {
+  min-height: 3.6875rem;
+  display: flex;
+  align-items: center;
+  padding: 0 .625rem 0 1rem;
+  border: 1px solid white;
+  border-radius: 1.25rem;
+  box-shadow: 0 0 .65rem rgb(255 255 255 / 42%);
+}
+.light-composer input {
+  flex: 1;
+  min-width: 0;
+  font: 400 1.25rem/1.2 "Montserrat", sans-serif;
+  color: white;
+  border: 0;
+  background: transparent;
+}
+.light-composer input::placeholder { color: white; text-shadow: var(--glow); opacity: 1; }
+.light-composer button { display: grid; place-items: center; padding: 0; }
+.voice-toggle { position: relative; z-index: 1; }
+.voice-toggle:focus-visible .voice-icon { outline: 2px solid #fad28e; border-radius: .5rem; }
+.voice-icon { position: relative; }
+.voice-orb {
+  position: absolute;
+  left: -69px;
+  top: -56px;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: 0;
+  scale: .82;
+  transition: opacity 260ms var(--ease), scale 260ms var(--ease);
+}
+.voice-toggle[aria-pressed="true"] .voice-orb {
+  opacity: 1;
+  scale: var(--voice-scale, 1);
+  transition: opacity 260ms var(--ease);
+  animation: breathe-voice-orb 3s ease-in-out infinite;
+}
+@keyframes breathe-voice-orb {
+  0%, 100% { transform: scale(.97); }
+  50% { transform: scale(1.035); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .voice-toggle[aria-pressed="true"] .voice-orb { scale: 1; }
+}
+.microphone-status {
+  position: relative;
+  z-index: 2;
+  margin-bottom: .5rem;
+  font: 400 .875rem/1.4 "Montserrat", sans-serif;
+}
+
+.light-screen .topbar, .light-controls { flex-shrink: 0; }
+.light-settings { flex-direction: column; align-items: stretch; justify-content: end; min-height: 0; }
+.chat-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  padding-block: clamp(.25rem, 2.2dvh, 1.25rem) clamp(.45rem, 5dvh, 2.8rem);
+  font: 400 .875rem/1.8 "Montserrat", sans-serif;
+}
+.chat-turn { flex: none; display: grid; gap: 1rem; overflow-wrap: anywhere; }
+.chat-turn:first-child { margin-top: auto; }
+.chat-turn + .chat-turn { margin-top: 2rem; }
+.guest-message {
+  justify-self: end;
+  width: fit-content;
+  max-width: min(78%, 13.25rem);
+  white-space: pre-wrap;
+  padding: .75rem;
+  border-radius: .625rem;
+  background: rgb(255 255 255 / 20%);
+  line-height: 1.25;
+}
+.guest-text { display: block; }
+.room-message p { margin: 0; }
+.room-message .reply-heading { margin-bottom: 1.5rem; font-size: 1.25rem; font-weight: 700; line-height: 1.4; }
+.room-message strong { font-weight: 700; }
+.quick-phrases { flex: 1; display: grid; grid-template-columns: repeat(2, 1fr); gap: .375rem; }
+.quick-phrases button {
+  min-height: 2.5rem;
+  font: 400 .875rem/1.4 "Montserrat", sans-serif;
+  border-radius: .625rem;
+  padding: .5rem .75rem;
+  background: rgb(255 255 255 / 20%);
+}
+.quick-phrases button:first-child { grid-column: span 2; }
+.light-mode-row { align-items: end; }
+.light-mode-toggle[aria-expanded="true"] { display: flex; justify-content: space-around; align-items: center; }
+.light-mode-toggle[aria-expanded="true"] span { width: .625rem; height: 1.8rem; transform: none; }
+.light-composer button[type="submit"]:disabled { opacity: .5; }
+
+.light-screen .light-beam {
+  filter: opacity(1);
+  transition: filter 480ms ease, transform 680ms var(--ease);
+}
+.light-screen:has([data-voice-open="true"]) .light-beam {
+  filter: opacity(0);
+  transform: translate(-68%, 28%) scale(1.25, .72);
+}
+.light-screen .topbar { transition: opacity 480ms ease; }
+.light-screen:has([data-voice-open="true"]) .topbar { opacity: .66; }
+.light-settings[data-voice-open="true"] :is(.chat-log, .light-title) { visibility: hidden; }
+.light-settings[data-voice-open="true"] .light-composer { justify-content: flex-end; border-color: transparent; box-shadow: none; }
+.voice-light {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  top: 10.15%;
+  left: 26.58%;
+  width: 167.72%;
+  height: 72.52%;
+  opacity: 0;
+  transform: translate(-27%, -16%) scale(.74);
+  mask-image: linear-gradient(to bottom, transparent, black 6% 88%, transparent);
+  transition: opacity 480ms ease, transform 680ms var(--ease);
+}
+.light-settings[data-voice-open="true"] .voice-light {
+  opacity: .9;
+  transform: translateX(-50%);
+}
+.voice-light canvas, .voice-light img { position: absolute; inset: 0; width: 100%; height: 100%; }
+.voice-light canvas[data-rendered="true"] + img { visibility: hidden; }
+.voice-back {
+  position: absolute;
+  top: clamp(4.75rem, 12.6svh, 7.25rem);
+  left: .75rem;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+.voice-back img { transform: scaleX(-1); }
+.voice-dialogue {
+  position: absolute;
+  top: 45%;
+  left: 1.5rem;
+  right: 1.5rem;
+  transform: translateY(-50%);
+  text-align: center;
+  font: 700 1.25rem/1.25 "Montserrat", sans-serif;
+  overflow-wrap: anywhere;
+}
+.voice-utterance {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: top 330ms var(--ease), transform 330ms var(--ease), opacity 330ms ease, filter 330ms ease;
+}
+.voice-question { max-height: 17svh; overflow: auto; }
+.voice-dialogue[data-answered="true"] .voice-utterance {
+  top: 0;
+  transform: translateY(calc(-100% - .55rem));
+  opacity: .68;
+  filter: blur(1px);
+}
+.voice-reply {
+  max-height: 32svh;
+  overflow: auto;
+  animation: reveal-voice-reply 330ms ease both;
+}
+.voice-thinking {
+  position: absolute;
+  inset-inline: 0;
+  top: calc(100% + .65rem);
+  font-size: .875rem;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.chat-thinking { opacity: .8; white-space: nowrap; }
+.quick-phrases button:disabled { opacity: .5; }
+.thinking-dots {
+  display: inline-block;
+  font-family: monospace;
+  white-space: nowrap;
+  animation: thinking-dots 900ms steps(1, end) infinite;
+}
+@keyframes thinking-dots {
+  0% { clip-path: inset(0 2ch 0 0); }
+  33.333% { clip-path: inset(0 1ch 0 0); }
+  66.667%, 100% { clip-path: inset(0); }
+}
+.voice-toggle:disabled { opacity: .4; }
+.voice-toggle:disabled .voice-orb { animation-play-state: paused; }
+@keyframes reveal-voice-reply {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
