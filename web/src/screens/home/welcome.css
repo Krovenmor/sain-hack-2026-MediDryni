@@ -32,7 +32,7 @@
   font: 400 clamp(2.25rem, 11.65vw, 3rem)/1.4 "Train One", sans-serif;
   text-shadow: 0 0 5px white;
 }
-.guest { overflow-wrap: anywhere; letter-spacing: -.2em; }
+.guest { overflow-wrap: anywhere; letter-spacing: normal; }
 .check-in {
   position: relative;
   display: flex;
