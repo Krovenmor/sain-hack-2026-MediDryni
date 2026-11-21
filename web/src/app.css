@@ -42,23 +42,39 @@
   background: var(--wine);
   color-scheme: dark;
 }
+@media (max-width: 37.5rem), (orientation: landscape) and (hover: none) and (max-height: 37.5rem) {
+  :root { --screen: 100%; }
+}
 * { box-sizing: border-box; }
 body { margin: 0; }
+html:has(.welcome:is(.home-screen, .scenario-screen, .light-screen)) { overscroll-behavior-y: none; }
 button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
 button:disabled { cursor: default; }
 button:focus-visible { outline: 2px solid #fad28e; outline-offset: -3px; }
 h1, h2, h3, p { margin: 0; font-weight: 400; }
 
 .welcome {
+  --screen-gutter: clamp(1rem, 5.83vw, 1.5rem);
   position: relative;
   isolation: isolate;
   max-width: var(--screen);
   min-height: 100svh;
   margin: auto;
-  padding: 0 clamp(1rem, 5.83vw, 1.5rem) 4.375rem;
+  padding-top: env(safe-area-inset-top);
+  padding-right: max(var(--screen-gutter), env(safe-area-inset-right));
+  padding-bottom: 4.375rem;
+  padding-left: max(var(--screen-gutter), env(safe-area-inset-left));
 }
+.welcome:is(.home-screen, .scenario-screen, .light-screen) {
+  min-height: 100dvh;
+  padding-bottom: max(clamp(.75rem, 2.5dvh, 1.45rem), env(safe-area-inset-bottom));
+}
+.welcome.scenario-screen { overflow-x: clip; }
 .topbar, .room-heading { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
 .topbar { min-height: 4.5rem; margin-inline: -.2rem; }
+.welcome:is(.home-screen, .scenario-screen, .light-screen) .topbar {
+  min-height: clamp(3.25rem, 8dvh, 4.5rem);
+}
 .menu-button { display: grid; place-items: center; padding: 0; min-width: 2.75rem; min-height: 2.75rem; }
 .menu-button img { display: block; }
 .hotel { text-align: right; font-size: 1.25rem; line-height: 1.15; text-shadow: var(--glow); }
@@ -71,7 +87,8 @@ dialog::backdrop { background: rgb(15 1 6 / 60%); }
   position: fixed;
   inset: 0 auto 0 max(0px, calc((100vw - var(--screen)) / 2));
   margin: 0;
-  padding: 2rem 1.375rem;
+  padding: max(2rem, env(safe-area-inset-top)) 1.375rem
+    max(2rem, env(safe-area-inset-bottom)) max(1.375rem, env(safe-area-inset-left));
   width: min(77vw, 19.8125rem);
   max-width: none;
   height: 100dvh;
@@ -80,7 +97,7 @@ dialog::backdrop { background: rgb(15 1 6 / 60%); }
 }
 .drawer[open] { animation: open-drawer 220ms var(--ease); }
 @keyframes open-drawer { from { transform: translateX(-100%); } }
-.close-menu { position: absolute; top: .9rem; right: 1.25rem; }
+.close-menu { position: absolute; top: max(.9rem, env(safe-area-inset-top)); right: 1.25rem; }
 .drawer h2 { font-size: 2rem; padding-bottom: .25rem; border-bottom: 1px solid; }
 .drawer nav { display: grid; gap: 1.2rem; margin-top: 2.5rem; }
 .drawer nav button { text-align: left; text-transform: uppercase; border-radius: 1rem; font-size: 1.35rem; padding: .3rem .6rem; }

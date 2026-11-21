@@ -56,8 +56,10 @@ export function ManualSettings({ periods, selected, onSelect, wakeUp, onPeriodCh
 
   return (
     <section className="manual-settings" aria-labelledby="manual-title">
-      <h1 id="manual-title">Ручная<br />настройка</h1>
-      <PeriodTabs periods={periods} selected={selected} onSelect={onSelect} name="manual-period" />
+      <header className="manual-period-header">
+        <h1 id="manual-title">Ручная<br />настройка</h1>
+        <PeriodTabs periods={periods} selected={selected} onSelect={onSelect} name="manual-period" />
+      </header>
       <div className="manual-card-grid">
         <div className="manual-row manual-row-top">
           <section className="manual-card manual-light" aria-labelledby="manual-light-title">

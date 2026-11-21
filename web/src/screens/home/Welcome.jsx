@@ -16,21 +16,26 @@ function PeriodCard({ period, wakeUp, expanded, onSelect, onShowPlan, onShowManu
   const contentId = useId();
   return (
     <article className={expanded ? "period expanded" : "period"}>
-      <button className="period-toggle" aria-label={period.name}
-        aria-controls={contentId} aria-expanded={expanded} onClick={onSelect}>
-        {period.name.toLocaleLowerCase("ru")}
-      </button>
-      <div className="period-content" id={contentId} inert={!expanded}>
-        <h3>{period.name}</h3>
-        <img className="card-rule" src={cardRule} alt="" />
-        <SettingsList settings={periodSummary(period, wakeUp)} />
-        <div className="period-actions">
-          <button className="pill" onClick={onShowManual}>Ручная настройка</button>
-          <button className="pill dark show-plan" onClick={onShowPlan}>
-            Полный сценарий
-          </button>
+      <div className="period-inner">
+        <button className="period-toggle" aria-label={period.name}
+          aria-controls={contentId} aria-expanded={expanded} onClick={onSelect}>
+          {period.name.toLocaleLowerCase("ru")}
+        </button>
+        <div className="period-content" id={contentId} inert={!expanded}>
+          <h3>{period.name}</h3>
+          <img className="card-rule" src={cardRule} alt="" />
+          <SettingsList settings={periodSummary(period, wakeUp)} />
+          <div className="period-actions">
+            <button className="pill" onClick={onShowManual}>Ручная настройка</button>
+            <button className="pill dark show-plan" onClick={onShowPlan}>
+              Полный сценарий
+            </button>
+          </div>
         </div>
       </div>
+      <svg className="period-outline" aria-hidden="true">
+        <rect x="1" y="1" rx="19" />
+      </svg>
     </article>
   );
 }

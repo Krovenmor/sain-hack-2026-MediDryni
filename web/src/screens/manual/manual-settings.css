@@ -1,10 +1,18 @@
 .welcome.manual-screen {
   --scenario-tab-size: clamp(1.125rem, 5.825vw, 1.5rem);
-  padding-right: clamp(.875rem, 5.1vw, 1.3125rem);
+  padding-right: max(clamp(.875rem, 5.1vw, 1.3125rem), env(safe-area-inset-right));
   padding-bottom: 2.375rem;
 }
 .manual-screen .light-beam { visibility: hidden; width: 0; }
 .manual-settings { margin-top: 2.625rem; }
+.manual-period-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: .5rem;
+  background: var(--wine);
+}
 .manual-settings h1 {
   margin-left: -.1875rem;
   font: 400 clamp(1.875rem, 9.7vw, 2.5rem)/1.4 "Train One", sans-serif;
@@ -12,7 +20,7 @@
   text-shadow: 0 0 10px white;
 }
 .manual-settings .scenario-tabs-rule { margin: .1875rem 0 .3125rem -.1875rem; }
-.manual-card-grid { display: grid; gap: 2.0625rem; margin-top: 2.1875rem; }
+.manual-card-grid { display: grid; gap: 2.0625rem; margin-top: 1.6875rem; }
 .manual-row { display: grid; }
 .manual-row-top { grid-template-columns: minmax(0, 201fr) minmax(0, 138fr); gap: clamp(.875rem, 6.8vw, 1.75rem); }
 .manual-row-middle {

@@ -1,21 +1,21 @@
 .scenario-screen {
   --scenario-title-size: clamp(1.875rem, 9.7vw, 2.5rem);
   --scenario-tab-size: clamp(1.125rem, 5.825vw, 1.5rem);
-  overflow: hidden;
-  padding-bottom: 4.75rem;
+  --scenario-heading-gap: clamp(.6rem, 2.9dvh, 1.6875rem);
+  --scenario-details-gap: clamp(.65rem, calc(6dvh - 1.5rem), 1.9375rem);
 }
 .scenario-screen .light-beam {
   /* Position the shared beam below the scenario title, tabs and light heading. */
   top: calc(11.1875rem + 1.45 * var(--scenario-title-size) + 1.1 * var(--scenario-tab-size));
 }
-.scenario { margin-top: 1.6875rem; }
+.scenario { margin-top: var(--scenario-heading-gap); }
 .scenario h1 {
   text-align: center;
   font: 400 var(--scenario-title-size)/1.45 "Train One", sans-serif;
   letter-spacing: -.2em;
   text-shadow: 0 0 10px white;
 }
-.scenario-details { margin-top: 1.9375rem; }
+.scenario-details { margin-top: var(--scenario-details-gap); }
 .scenario-light { text-align: center; }
 .scenario-light h2, .scenario-wakeup h2 { font-size: 2rem; line-height: 1.18; }
 .scenario-light h2, .scenario-metrics { padding-left: .75rem; }
@@ -23,8 +23,8 @@
 .scenario-metrics {
   display: grid;
   justify-items: center;
-  gap: 1.3125rem;
-  margin: 2.25rem 0 0;
+  gap: clamp(.45rem, calc(4dvh - 1rem), 1.3125rem);
+  margin: clamp(.8rem, calc(6dvh - 1.45rem), 2.25rem) 0 0;
 }
 .scenario-metric {
   display: flex;
@@ -45,7 +45,7 @@
   grid-template-columns: 1fr 1fr;
   justify-items: start;
   align-items: end;
-  margin: 3.375rem 0 0 .1875rem;
+  margin: clamp(1rem, calc(8dvh - 1.8rem), 3.375rem) 0 0 .1875rem;
 }
 .scenario-climate-rays {
   position: absolute;
@@ -74,7 +74,7 @@
 }
 .scenario-dnd small { display: block; font-size: .875rem; }
 .scenario-wakeup {
-  margin: 3.4375rem 0 0;
+  margin: clamp(1rem, calc(8dvh - 1.8rem), 3.4375rem) 0 0;
   padding-left: 1.3125rem;
   text-align: center;
 }
@@ -85,3 +85,34 @@
   line-height: 1.2;
 }
 .scenario-wakeup p { font-size: 1.5rem; }
+
+@media (max-height: 920px) {
+  .scenario-screen {
+    --scenario-title-size: clamp(1.75rem, 4.5dvh, 2.25rem);
+    --scenario-heading-gap: clamp(.45rem, calc(4dvh - 1.2rem), 1.4rem);
+    --scenario-details-gap: clamp(.65rem, calc(6dvh - 1.8rem), 1.9375rem);
+  }
+  .scenario-screen .light-beam {
+    top: calc(4.6rem + 1.45 * var(--scenario-title-size) + var(--scenario-heading-gap) + var(--scenario-details-gap));
+  }
+  .scenario-light h2, .scenario-wakeup h2 { font-size: clamp(1.3rem, 3.7dvh, 1.85rem); }
+  .scenario-metrics {
+    margin-top: clamp(.55rem, calc(8dvh - 2.75rem), 2.25rem);
+    gap: clamp(.35rem, calc(5dvh - 1.75rem), 1.3125rem);
+  }
+  .scenario-metric.kelvin dd, .scenario-wakeup time { font-size: clamp(2.5rem, 7.2dvh, 3.5rem); }
+  .scenario-metric.brightness dd { font-size: clamp(2rem, 5.8dvh, 2.75rem); }
+  .scenario-metric.curtains dd { font-size: clamp(1.65rem, 4.8dvh, 2.15rem); }
+  .scenario-temperature { font-size: clamp(2.55rem, 6.8dvh, 3.5rem); }
+  .scenario-climate, .scenario-wakeup { margin-top: clamp(.5rem, calc(10dvh - 3.45rem), 3.4375rem); }
+  .scenario-wakeup time { margin-block: .2rem; }
+}
+
+@media (max-height: 650px) {
+  .scenario-metrics { margin-top: .35rem; gap: .2rem; }
+  .scenario-climate h2 { font-size: 1.25rem; }
+  .scenario-temperature { font-size: 2.35rem; }
+  .scenario-dnd { font-size: 1.1rem; padding-bottom: .25rem; }
+  .scenario-wakeup time { font-size: clamp(2.25rem, 6.75dvh, 2.75rem); }
+  .scenario-wakeup p { font-size: 1.25rem; }
+}

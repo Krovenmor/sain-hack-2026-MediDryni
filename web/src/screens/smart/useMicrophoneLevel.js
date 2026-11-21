@@ -8,6 +8,15 @@ export function useMicrophoneLevel(enabled, orb) {
     setError("");
     if (!enabled) return;
 
+    if (!window.isSecureContext) {
+      setError("Для доступа к микрофону откройте страницу по HTTPS.");
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder !== "function") {
+      setError("Этот браузер не поддерживает голосовую запись.");
+      return;
+    }
+
     const image = orb.current;
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
     let disposed = false;
