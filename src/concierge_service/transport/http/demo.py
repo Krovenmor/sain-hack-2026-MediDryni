@@ -42,6 +42,10 @@ class StartClient(BaseModel):
     access_code: SecretStr | None = Field(default=None, max_length=256)
 
 
+class DefaultDataset(BaseModel):
+    dataset_code: Identifier
+
+
 class AlarmPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -133,6 +137,7 @@ class DemoAccess:
 
 def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB):
     access = DemoAccess(code)
+    default_dataset_code: str | None = None
 
     @app.get("/", include_in_schema=False)
     async def entry(request: Request):
@@ -144,6 +149,20 @@ def install_demo(app: FastAPI, service: DemoService, code: str, web: Path = _WEB
     @app.get("/login.js", include_in_schema=False)
     async def login_script():
         return FileResponse(web / "public/login.js", media_type="text/javascript", headers=_PRIVATE)
+
+    @app.get("/api/v1/demo/default-dataset")
+    async def get_default_dataset():
+        return JSONResponse({"dataset_code": default_dataset_code}, headers=_PRIVATE)
+
+    @app.put("/api/v1/demo/default-dataset", status_code=204)
+    async def set_default_dataset(payload: DefaultDataset, authorization: Annotated[str | None, Header()] = None):
+        nonlocal default_dataset_code
+        scheme, _, token = (authorization or "").partition(" ")
+        if (not service.token or scheme.lower() != "bearer"
+                or not secrets.compare_digest(token.encode(), service.token.encode())):
+            raise HTTPException(401, detail={"code": "unauthorized"})
+        default_dataset_code = payload.dataset_code
+        return Response(status_code=204, headers=_PRIVATE)
 
     @app.post("/api/v1/run_client")
     async def start(payload: StartClient, request: Request, key: Annotated[str, Depends(client_key)]):
